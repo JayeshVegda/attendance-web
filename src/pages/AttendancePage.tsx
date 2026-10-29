@@ -944,10 +944,13 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   <th className="sticky top-0 z-10 min-w-[6rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
                     Upad
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[9.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-rose-700">
+                    Recover Upad
+                  </th>
+                  <th className="sticky top-0 z-10 min-w-[17rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-600">
                     Summary
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-emerald-800">
                     Total Payable
                   </th>
                   <th className="sticky top-0 z-10 min-w-[8.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-stone-600">
@@ -1135,22 +1138,88 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         </button>
                       </td>
 
-                      {/* 6. Summary Column */}
+                      {/* Recover Upad Column */}
+                      <td className="border-b border-l border-stone-100 px-2 py-2 text-center">
+                        {row.upadOutstandingPaise > 0 ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <div className="relative">
+                              <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-rose-600">
+                                -₹
+                              </span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={entries[employee.id]?.recovery ?? ''}
+                                onChange={(e) => setRowInput(employee.id, { recovery: e.target.value })}
+                                className="w-18 rounded-lg border border-stone-200 bg-white pl-5 pr-1.5 py-1 text-xs font-bold text-stone-900 tabular-nums focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                                title={`Max recoverable from salary: ${formatMoney(Math.min(row.upadOutstandingPaise, Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise)))}`}
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const maxVal = Math.min(
+                                  row.upadOutstandingPaise,
+                                  Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise),
+                                )
+                                setRowInput(employee.id, { recovery: paiseToInput(maxVal) })
+                              }}
+                              className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-1 text-[10px] font-semibold text-stone-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 transition"
+                              title="Recover full upad from this salary"
+                            >
+                              Max
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-stone-300 font-medium">—</span>
+                        )}
+                      </td>
+
+                      {/* 6. Summary Column (x | x | x | with colors & increased font size) */}
                       <td className="border-b border-l border-stone-100 px-3 py-2 text-left">
-                        <div className="flex flex-col gap-0.5 text-[11px]">
-                          <div className="font-semibold text-stone-800">
-                            {row.daysWorked} d {row.otMinutes > 0 ? `· +${formatHours(row.otMinutes)} OT` : ''}
-                          </div>
-                          <div className="text-[10px] text-stone-500">
-                            Upad: <span className="font-medium text-amber-800">{formatMoney(row.upadOutstandingPaise)}</span>
-                            {row.upadRecoveryPaise > 0 && (
-                              <span className="text-emerald-700 ml-1 font-medium">(-{formatMoney(row.upadRecoveryPaise)})</span>
-                            )}
-                          </div>
-                          <div className="text-[9px] text-stone-400">
-                            Rem: {formatMoney(Math.max(0, row.upadOutstandingPaise - row.upadRecoveryPaise))}
-                            {row.openingPaise > 0 ? ` · +${formatMoney(row.openingPaise)} baki` : ''}
-                          </div>
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium whitespace-nowrap leading-none py-0.5">
+                          <span className="font-bold text-stone-900">
+                            {row.daysWorked} d
+                          </span>
+                          <span className="text-stone-300 font-normal">|</span>
+                          <span className={clsx(
+                            'font-bold tabular-nums',
+                            row.otMinutes > 0 ? 'text-teal-700' : 'text-stone-400',
+                          )}>
+                            {row.otMinutes > 0 ? `+${formatHours(row.otMinutes)} OT` : '0h OT'}
+                          </span>
+                          <span className="text-stone-300 font-normal">|</span>
+                          <span className="font-bold text-emerald-800 tabular-nums">
+                            {formatMoney(row.earnedPaise, { showZero: true })} Sal
+                          </span>
+                          <span className="text-stone-300 font-normal">|</span>
+                          <span className={clsx(
+                            'font-bold tabular-nums',
+                            row.upadOutstandingPaise > 0 ? 'text-amber-800' : 'text-stone-400',
+                          )}>
+                            {formatMoney(row.upadOutstandingPaise)} Upad
+                          </span>
+                          {row.upadRecoveryPaise > 0 && (
+                            <>
+                              <span className="text-stone-300 font-normal">|</span>
+                              <span className="font-bold text-rose-700 tabular-nums">
+                                -{formatMoney(row.upadRecoveryPaise)} Rec
+                              </span>
+                            </>
+                          )}
+                          <span className="text-stone-300 font-normal">|</span>
+                          <span className="font-bold text-stone-600 tabular-nums">
+                            {formatMoney(Math.max(0, row.upadOutstandingPaise - row.upadRecoveryPaise))} Rem
+                          </span>
+                          {row.openingPaise > 0 && (
+                            <>
+                              <span className="text-stone-300 font-normal">|</span>
+                              <span className="font-bold text-sky-800 tabular-nums">
+                                +{formatMoney(row.openingPaise)} Baki
+                              </span>
+                            </>
+                          )}
                         </div>
                       </td>
 
@@ -1159,13 +1228,13 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         <div className="text-sm font-bold text-emerald-800 tabular-nums">
                           {formatMoney(row.totalDuePaise, { showZero: true })}
                         </div>
-                        <div className="mt-0.5 text-[10px] text-stone-500 tabular-nums">
-                          {row.paidPaise === row.totalDuePaise ? (
-                            <span className="text-emerald-700 font-medium">Paying full</span>
-                          ) : (
-                            <span className="text-amber-700 font-medium">
-                              Pay {formatMoney(row.paidPaise)} · Rem {formatMoney(row.closingPaise)}
+                        <div className="mt-0.5 text-[11px] text-stone-500 tabular-nums">
+                          {row.upadRecoveryPaise > 0 ? (
+                            <span className="text-rose-700 font-medium">
+                              (Sal - {formatMoney(row.upadRecoveryPaise)})
                             </span>
+                          ) : (
+                            <span className="text-stone-400 font-normal">No deduction</span>
                           )}
                         </div>
                       </td>
@@ -1188,7 +1257,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                           {row.closingPaise === 0 && row.totalDuePaise > 0 ? (
                             <>
                               <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
-                              <span className="truncate">Paid {formatMoney(row.paidPaise)}</span>
+                              <span className="truncate font-bold">Paid {formatMoney(row.paidPaise)}</span>
                             </>
                           ) : row.closingPaise > 0 ? (
                             <>
@@ -1245,11 +1314,36 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-amber-50/70 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
                     {totals.outstanding > 0 ? formatMoney(totals.outstanding, { showZero: true }) : '—'}
                   </td>
-                  {/* Footer 6. Summary Totals */}
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-3 py-2 text-left text-[10px] font-semibold text-stone-800 tabular-nums">
-                    <div>{rows.reduce((sum, r) => sum + r.daysWorked, 0)} d total</div>
-                    <div className="text-stone-500 font-medium">
-                      Rec: {formatMoney(totals.recovery)} · Rem: {formatMoney(Math.max(0, totals.outstanding - totals.recovery))}
+                  {/* Footer Recover Upad Totals */}
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-rose-50/50 px-2 py-1.5 text-center text-xs font-bold text-rose-900 tabular-nums">
+                    -{formatMoney(totals.recovery, { showZero: true })}
+                  </td>
+                  {/* Footer 6. Summary Totals (x | x | x | with colors & increased font size) */}
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-3 py-2 text-left">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs whitespace-nowrap leading-none">
+                      <span className="font-bold text-stone-900">
+                        {rows.reduce((sum, r) => sum + r.daysWorked, 0)} d
+                      </span>
+                      <span className="text-stone-300 font-normal">|</span>
+                      <span className="font-bold text-teal-800 tabular-nums">
+                        +{formatHours(rows.reduce((sum, r) => sum + r.otMinutes, 0))} OT
+                      </span>
+                      <span className="text-stone-300 font-normal">|</span>
+                      <span className="font-bold text-emerald-800 tabular-nums">
+                        {formatMoney(totals.earned)} Sal
+                      </span>
+                      <span className="text-stone-300 font-normal">|</span>
+                      <span className="font-bold text-amber-800 tabular-nums">
+                        {formatMoney(totals.outstanding)} Upad
+                      </span>
+                      <span className="text-stone-300 font-normal">|</span>
+                      <span className="font-bold text-rose-700 tabular-nums">
+                        -{formatMoney(totals.recovery)} Rec
+                      </span>
+                      <span className="text-stone-300 font-normal">|</span>
+                      <span className="font-bold text-stone-700 tabular-nums">
+                        {formatMoney(Math.max(0, totals.outstanding - totals.recovery))} Rem
+                      </span>
                     </div>
                   </td>
                   {/* Footer 7. Total Payable Totals */}
@@ -1310,14 +1404,14 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           {/* Summary Breakdown Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1">
             {/* 1. Working Days & OT */}
-            <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+            <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-stone-600">
                 Work Completed
               </div>
-              <div className="mt-1 text-base font-bold text-stone-900 tabular-nums">
-                {rows.reduce((sum, r) => sum + r.daysWorked, 0)} <span className="text-xs font-normal text-stone-500">days</span>
+              <div className="mt-1 text-lg font-bold text-stone-900 tabular-nums">
+                {rows.reduce((sum, r) => sum + r.daysWorked, 0)} <span className="text-sm font-normal text-stone-500">days</span>
               </div>
-              <div className="text-[11px] font-medium text-emerald-700 tabular-nums mt-0.5">
+              <div className="text-xs font-semibold text-teal-700 tabular-nums mt-0.5">
                 {rows.reduce((sum, r) => sum + r.otMinutes, 0) > 0
                   ? `+${formatHours(rows.reduce((sum, r) => sum + r.otMinutes, 0))} overtime`
                   : '0 hr overtime'}
@@ -1325,48 +1419,48 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             </div>
 
             {/* 2. Salary & Last Baki */}
-            <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+            <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-emerald-800">
                 Gross Salary
               </div>
-              <div className="mt-1 text-base font-bold text-stone-900 tabular-nums">
+              <div className="mt-1 text-lg font-bold text-emerald-900 tabular-nums">
                 {formatMoney(totals.earned, { showZero: true })}
               </div>
-              <div className="text-[11px] font-medium text-stone-500 tabular-nums mt-0.5">
+              <div className="text-xs font-medium text-stone-500 tabular-nums mt-0.5">
                 {totals.opening > 0 ? `+${formatMoney(totals.opening)} last baki` : 'No opening baki'}
               </div>
             </div>
 
             {/* 3. Upad Status (Recovered & Remaining) */}
-            <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-900">
                 Upad Status
               </div>
-              <div className="mt-1 text-base font-bold text-amber-900 tabular-nums">
+              <div className="mt-1 text-lg font-bold text-amber-950 tabular-nums">
                 {formatMoney(totals.outstanding, { showZero: true })}
               </div>
-              <div className="text-[11px] font-medium text-stone-600 tabular-nums mt-0.5">
+              <div className="text-xs font-semibold text-rose-700 tabular-nums mt-0.5">
                 {totals.recovery > 0 ? (
-                  <span className="text-emerald-700 font-semibold">Recovering {formatMoney(totals.recovery)}</span>
+                  <span>-{formatMoney(totals.recovery)} being recovered</span>
                 ) : (
-                  <span>₹0 recovering · {formatMoney(totals.outstanding)} remain</span>
+                  <span className="text-stone-500 font-normal">₹0 recovered · {formatMoney(totals.outstanding)} remain</span>
                 )}
               </div>
             </div>
 
             {/* 4. Adjustments / Carried Balance */}
-            <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
-                Adjustments & Balance
+            <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-stone-600">
+                Net Deductions & Carry
               </div>
-              <div className="mt-1 text-base font-bold text-stone-900 tabular-nums">
+              <div className="mt-1 text-lg font-bold text-stone-900 tabular-nums">
                 {signedMoney(totals.adjustment)}
               </div>
-              <div className="text-[11px] font-medium text-stone-500 tabular-nums mt-0.5">
+              <div className="text-xs font-medium text-stone-500 tabular-nums mt-0.5">
                 {totals.closing > 0 ? (
                   <span className="text-amber-700 font-semibold">{formatMoney(totals.closing)} carry forward</span>
                 ) : (
-                  'Fully settled'
+                  <span className="text-emerald-700 font-medium">Fully settled</span>
                 )}
               </div>
             </div>
@@ -1375,17 +1469,17 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           {/* Right: Net Payable & Save Payout Action */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 lg:border-l lg:border-stone-200 lg:pl-6 shrink-0">
             <div className="text-left sm:text-right">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+              <div className="text-xs font-bold uppercase tracking-wider text-emerald-800">
                 Total Payable Amount
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-emerald-800 tabular-nums tracking-tight">
+              <div className="text-2xl sm:text-3xl font-extrabold text-emerald-800 tabular-nums tracking-tight">
                 {formatMoney(totals.due, { showZero: true })}
               </div>
-              <div className="text-[11px] font-medium text-stone-500 tabular-nums mt-0.5">
-                Paying: <span className="font-bold text-stone-800">{formatMoney(totals.paid)}</span>
+              <div className="text-xs font-medium text-stone-600 tabular-nums mt-0.5">
+                Paying: <span className="font-bold text-stone-900">{formatMoney(totals.paid)}</span>
                 {totals.closing > 0 && (
                   <span className="text-amber-700 font-semibold ml-1.5">
-                    ({formatMoney(totals.closing)} balance remain)
+                    ({formatMoney(totals.closing)} remain)
                   </span>
                 )}
               </div>
@@ -2013,7 +2107,7 @@ function WorkerUpadModal({
   onUpdateRecovery: (amount: string) => void
   currentRecovery: string
 }) {
-  const [tab, setTab] = useState<'give' | 'return' | 'recover'>('give')
+  const [mode, setMode] = useState<'give' | 'recover'>('give')
 
   // Give Upad Form
   const [giveCategory, setGiveCategory] = useState<UpadCategory>('regular')
@@ -2021,20 +2115,17 @@ function WorkerUpadModal({
   const [giveNote, setGiveNote] = useState('')
   const [giveError, setGiveError] = useState('')
 
-  // Cash Return Form
-  const [returnCategory, setReturnCategory] = useState<UpadCategory>('regular')
-  const [returnAmount, setReturnAmount] = useState('')
-  const [returnNote, setReturnNote] = useState('')
-  const [returnError, setReturnError] = useState('')
-
-  // Cycle Recovery Form
-  const [recoveryVal, setRecoveryVal] = useState(currentRecovery)
+  // Recover / Return Form
+  const [recMethod, setRecMethod] = useState<'salary' | 'cash'>('salary')
+  const [recAmount, setRecAmount] = useState(currentRecovery || '')
+  const [recNote, setRecNote] = useState('')
+  const [recError, setRecError] = useState('')
 
   const queryClient = useQueryClient()
   const toast = useToast()
 
   useEffect(() => {
-    setRecoveryVal(currentRecovery)
+    setRecAmount(currentRecovery || '')
   }, [currentRecovery])
 
   const giveMutation = useMutation({
@@ -2057,50 +2148,56 @@ function WorkerUpadModal({
       setGiveAmount('')
       setGiveNote('')
       setGiveError('')
-      toast('Upad advance recorded')
+      toast('Cash advance given successfully')
     },
     onError: (err) => setGiveError(err instanceof Error ? err.message : 'Could not record advance'),
   })
 
-  const returnMutation = useMutation({
-    mutationFn: async () => {
-      const paise = parseMoneyInput(returnAmount)
-      if (paise <= 0) throw new Error('Enter an amount greater than zero.')
-      const balance = returnCategory === 'regular' ? row.regularUpadPaise : row.extraUpadPaise
-      if (paise > balance) {
-        throw new Error(`Only ${formatMoney(balance, { showZero: true })} is outstanding in ${returnCategory} upad.`)
-      }
+  const cashReturnMutation = useMutation({
+    mutationFn: async (paise: number) => {
       return createCashReturn({
         employeeId: row.employee.id,
         date: payoutDate,
-        category: returnCategory,
+        category: 'regular',
         amountPaise: paise,
-        note: returnNote.trim() || undefined,
+        note: recNote.trim() || undefined,
       })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['upad'] })
       queryClient.invalidateQueries({ queryKey: ['payroll'] })
       queryClient.invalidateQueries({ queryKey: ['employee-detail'] })
-      setReturnAmount('')
-      setReturnNote('')
-      setReturnError('')
-      toast('Cash return recorded')
+      setRecAmount('')
+      setRecNote('')
+      setRecError('')
+      toast('Cash return recorded successfully')
     },
-    onError: (err) => setReturnError(err instanceof Error ? err.message : 'Could not record return'),
+    onError: (err) => setRecError(err instanceof Error ? err.message : 'Could not record return'),
   })
 
-  function handleSaveRecovery() {
-    onUpdateRecovery(recoveryVal)
-    toast('Cycle upad recovery updated')
+  function handleExecuteRecoveryOrReturn() {
+    const paise = parseMoneyInput(recAmount)
+    if (paise < 0) return setRecError('Enter a valid amount.')
+
+    if (recMethod === 'salary') {
+      onUpdateRecovery(recAmount)
+      toast(`₹${recAmount || '0'} set to recover from salary`)
+      onClose()
+    } else {
+      if (paise <= 0) return setRecError('Enter an amount greater than zero.')
+      if (paise > row.upadOutstandingPaise) {
+        return setRecError(`Worker only owes ${formatMoney(row.upadOutstandingPaise)} total.`)
+      }
+      cashReturnMutation.mutate(paise)
+    }
   }
 
-  // Sorted recent entries
+  // Sorted recent entries (max 6)
   const sortedHistory = useMemo(() => {
-    return [...upadEntries].sort((a, b) => (b.date > a.date ? 1 : -1)).slice(0, 8)
+    return [...upadEntries].sort((a, b) => (b.date > a.date ? 1 : -1)).slice(0, 6)
   }, [upadEntries])
 
-  const maxWageRecovery = Math.min(
+  const maxSalaryRecovery = Math.min(
     row.upadOutstandingPaise,
     Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise),
   )
@@ -2109,129 +2206,88 @@ function WorkerUpadModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={`Upad Management · ${row.employee.name}`}
-      description={`#${row.employee.employee_no} · Total Outstanding: ${formatMoney(row.upadOutstandingPaise)}`}
-      size="lg"
+      title={row.employee.name}
+      description={`#${row.employee.employee_no} · ${formatMoney(row.employee.daily_rate_paise)}/d rate · Upad Management`}
+      size="md"
       footer={
-        <Button variant="secondary" onClick={onClose}>
-          Done
+        <Button variant="secondary" onClick={onClose} className="w-full sm:w-auto">
+          Done / Close
         </Button>
       }
     >
       <div className="space-y-4">
-        {/* Outstanding Upad Overview Cards */}
-        <div className="grid grid-cols-3 gap-2.5">
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
-              Regular Upad
+        {/* Big Clear Upad Status Card */}
+        <div className="flex items-center justify-between rounded-2xl bg-amber-50/90 border border-amber-200/90 px-4 py-3.5">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-amber-800">
+              Current Upad Balance
             </div>
-            <div className="mt-0.5 text-base font-bold text-stone-900 tabular-nums">
-              {formatMoney(row.regularUpadPaise, { showZero: true })}
-            </div>
-          </div>
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
-              Extra Upad
-            </div>
-            <div className="mt-0.5 text-base font-bold text-stone-900 tabular-nums">
-              {formatMoney(row.extraUpadPaise, { showZero: true })}
-            </div>
-          </div>
-          <div className="rounded-xl border border-amber-300 bg-amber-50/80 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-900">
-              Total Outstanding
-            </div>
-            <div className="mt-0.5 text-base font-bold text-amber-900 tabular-nums">
+            <div className="text-2xl font-bold text-amber-950 tabular-nums">
               {formatMoney(row.upadOutstandingPaise, { showZero: true })}
             </div>
           </div>
+          <div className="text-right text-xs font-medium text-amber-900/80">
+            <div>Regular: {formatMoney(row.regularUpadPaise)}</div>
+            {row.extraUpadPaise > 0 && <div>Extra: {formatMoney(row.extraUpadPaise)}</div>}
+          </div>
         </div>
 
-        {/* Tab Selection */}
-        <div className="flex border-b border-stone-200 text-xs font-semibold">
+        {/* Action Mode Toggle */}
+        <div className="grid grid-cols-2 gap-2 p-1 bg-stone-100 rounded-xl">
           <button
             type="button"
-            onClick={() => setTab('give')}
+            onClick={() => setMode('give')}
             className={clsx(
-              'px-3.5 py-2 border-b-2 transition-colors',
-              tab === 'give'
-                ? 'border-emerald-600 text-emerald-900 font-bold'
-                : 'border-transparent text-stone-500 hover:text-stone-800',
+              'py-2 px-3 rounded-lg text-xs font-bold transition text-center select-none',
+              mode === 'give'
+                ? 'bg-white text-emerald-800 shadow-xs ring-1 ring-stone-200'
+                : 'text-stone-600 hover:text-stone-900',
             )}
           >
             + Give Advance
           </button>
           <button
             type="button"
-            onClick={() => setTab('return')}
+            onClick={() => setMode('recover')}
             className={clsx(
-              'px-3.5 py-2 border-b-2 transition-colors',
-              tab === 'return'
-                ? 'border-sky-600 text-sky-900 font-bold'
-                : 'border-transparent text-stone-500 hover:text-stone-800',
+              'py-2 px-3 rounded-lg text-xs font-bold transition text-center select-none',
+              mode === 'recover'
+                ? 'bg-white text-rose-800 shadow-xs ring-1 ring-stone-200'
+                : 'text-stone-600 hover:text-stone-900',
             )}
           >
-            Cash Return
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('recover')}
-            className={clsx(
-              'px-3.5 py-2 border-b-2 transition-colors',
-              tab === 'recover'
-                ? 'border-amber-600 text-amber-900 font-bold'
-                : 'border-transparent text-stone-500 hover:text-stone-800',
-            )}
-          >
-            Salary Deduction
+            - Deduct / Return
           </button>
         </div>
 
-        {/* Tab 1: Give Upad */}
-        {tab === 'give' && (
-          <div className="space-y-3 rounded-2xl border border-stone-200 p-3.5 bg-white">
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setGiveCategory('regular')}
-                className={clsx(
-                  'rounded-xl border p-2.5 text-left transition',
-                  giveCategory === 'regular'
-                    ? 'border-emerald-600 bg-emerald-50 ring-1 ring-emerald-600'
-                    : 'border-stone-200 bg-white hover:border-stone-300',
-                )}
-              >
-                <div className="text-xs font-bold text-stone-900">Regular Upad</div>
-                <div className="text-[10px] text-stone-500">Standard advance against salary</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setGiveCategory('extra')}
-                className={clsx(
-                  'rounded-xl border p-2.5 text-left transition',
-                  giveCategory === 'extra'
-                    ? 'border-emerald-600 bg-emerald-50 ring-1 ring-emerald-600'
-                    : 'border-stone-200 bg-white hover:border-stone-300',
-                )}
-              >
-                <div className="text-xs font-bold text-stone-900">Extra Upad</div>
-                <div className="text-[10px] text-stone-500">Emergency / special loan</div>
-              </button>
+        {/* 1. GIVE ADVANCE FORM */}
+        {mode === 'give' && (
+          <div className="space-y-3 pt-1">
+            <div>
+              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-1.5">
+                Amount to Give (₹)
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold text-lg">
+                  ₹
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0"
+                  autoFocus
+                  value={giveAmount}
+                  onChange={(e) => {
+                    setGiveAmount(e.target.value)
+                    setGiveError('')
+                  }}
+                  className="w-full rounded-xl border border-stone-300 bg-white pl-8 pr-4 py-2.5 text-xl font-bold text-stone-900 tabular-nums focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-600/20"
+                />
+              </div>
             </div>
 
-            <Field label="Advance Amount (₹)" hint="Enter amount given to worker">
-              <Input
-                inputMode="decimal"
-                placeholder="0"
-                value={giveAmount}
-                onChange={(e) => {
-                  setGiveAmount(e.target.value)
-                  setGiveError('')
-                }}
-              />
-            </Field>
-
-            <div className="flex flex-wrap gap-1.5">
+            {/* Quick Presets */}
+            <div className="flex flex-wrap gap-2">
               {[200, 500, 1000, 2000].map((preset) => (
                 <button
                   key={preset}
@@ -2240,216 +2296,223 @@ function WorkerUpadModal({
                     setGiveAmount(String(preset))
                     setGiveError('')
                   }}
-                  className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                  className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-bold text-stone-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 transition"
                 >
-                  ₹{preset}
+                  +₹{preset}
                 </button>
               ))}
             </div>
 
-            <Field label="Note" hint="Optional purpose (e.g. medical, Diwali)">
-              <Input
-                placeholder="e.g. emergency advance"
+            <div>
+              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-1">
+                Note (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Festival advance, urgent cash, medical"
                 value={giveNote}
                 onChange={(e) => setGiveNote(e.target.value)}
+                className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-emerald-600 focus:outline-none"
               />
-            </Field>
+            </div>
 
-            {giveError && <div className="text-xs text-rose-600 font-medium">{giveError}</div>}
+            {giveError && (
+              <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                {giveError}
+              </div>
+            )}
 
             <Button
               variant="emerald"
+              size="lg"
               onClick={() => giveMutation.mutate()}
               loading={giveMutation.isPending}
-              disabled={!giveAmount}
-              className="w-full"
+              disabled={!giveAmount || parseMoneyInput(giveAmount) <= 0}
+              className="w-full h-11 text-sm font-bold shadow-sm"
             >
               <HandCoins className="h-4 w-4" />
-              <span>Record Given Advance</span>
+              <span>Give ₹{giveAmount || '0'} Advance</span>
             </Button>
           </div>
         )}
 
-        {/* Tab 2: Cash Return */}
-        {tab === 'return' && (
-          <div className="space-y-3 rounded-2xl border border-stone-200 p-3.5 bg-white">
-            <div className="grid grid-cols-2 gap-2.5">
+        {/* 2. RECOVER / RETURN FORM */}
+        {mode === 'recover' && (
+          <div className="space-y-3 pt-1">
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setReturnCategory('regular')}
+                onClick={() => setRecMethod('salary')}
                 className={clsx(
-                  'rounded-xl border p-2.5 text-left transition',
-                  returnCategory === 'regular'
-                    ? 'border-sky-600 bg-sky-50 ring-1 ring-sky-600'
-                    : 'border-stone-200 bg-white hover:border-stone-300',
+                  'rounded-xl border p-2.5 text-left text-xs transition',
+                  recMethod === 'salary'
+                    ? 'border-emerald-600 bg-emerald-50/80 font-bold text-emerald-950 ring-1 ring-emerald-600'
+                    : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50',
                 )}
               >
-                <div className="text-xs font-bold text-stone-900">Against Regular Upad</div>
-                <div className="text-[10px] text-stone-500">Balance: {formatMoney(row.regularUpadPaise)}</div>
+                <div className="font-bold text-xs">Deduct from Salary</div>
+                <div className="text-[11px] text-stone-500 font-normal">Recovers in cycle settlement</div>
               </button>
               <button
                 type="button"
-                onClick={() => setReturnCategory('extra')}
+                onClick={() => setRecMethod('cash')}
                 className={clsx(
-                  'rounded-xl border p-2.5 text-left transition',
-                  returnCategory === 'extra'
-                    ? 'border-sky-600 bg-sky-50 ring-1 ring-sky-600'
-                    : 'border-stone-200 bg-white hover:border-stone-300',
+                  'rounded-xl border p-2.5 text-left text-xs transition',
+                  recMethod === 'cash'
+                    ? 'border-sky-600 bg-sky-50/80 font-bold text-sky-950 ring-1 ring-sky-600'
+                    : 'border-stone-200 bg-white text-stone-600 hover:bg-stone-50',
                 )}
               >
-                <div className="text-xs font-bold text-stone-900">Against Extra Upad</div>
-                <div className="text-[10px] text-stone-500">Balance: {formatMoney(row.extraUpadPaise)}</div>
+                <div className="font-bold text-xs">Worker Return Cash</div>
+                <div className="text-[11px] text-stone-500 font-normal">Handed cash back at counter</div>
               </button>
             </div>
 
-            <Field label="Amount Returned (₹)" hint="Cash handed back by worker">
-              <Input
-                inputMode="decimal"
-                placeholder="0"
-                value={returnAmount}
-                onChange={(e) => {
-                  setReturnAmount(e.target.value)
-                  setReturnError('')
-                }}
-              />
-            </Field>
+            <div>
+              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-1.5">
+                {recMethod === 'salary' ? 'Amount to Deduct from Salary (₹)' : 'Cash Amount Returned (₹)'}
+              </label>
+              <div className="relative">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold text-lg">
+                  ₹
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0"
+                  autoFocus
+                  value={recAmount}
+                  onChange={(e) => {
+                    setRecAmount(e.target.value)
+                    setRecError('')
+                  }}
+                  className="w-full rounded-xl border border-stone-300 bg-white pl-8 pr-4 py-2.5 text-xl font-bold text-stone-900 tabular-nums focus:border-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-600/20"
+                />
+              </div>
+            </div>
 
-            <div className="flex flex-wrap gap-1.5">
-              {(() => {
-                const bal = returnCategory === 'regular' ? row.regularUpadPaise : row.extraUpadPaise
-                const presets = [bal, 50000, 100000].filter((v, i, l) => v > 0 && l.indexOf(v) === i)
-                return presets.map((preset) => (
+            {/* Quick Presets */}
+            <div className="flex flex-wrap gap-2">
+              {[
+                row.upadOutstandingPaise,
+                maxSalaryRecovery,
+                50000,
+                100000,
+              ]
+                .filter((v, i, l) => v > 0 && l.indexOf(v) === i)
+                .map((preset) => (
                   <button
                     key={preset}
                     type="button"
                     onClick={() => {
-                      setReturnAmount(paiseToInput(preset))
-                      setReturnError('')
+                      setRecAmount(paiseToInput(preset))
+                      setRecError('')
                     }}
-                    className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-100"
+                    className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-bold text-stone-700 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800 transition"
                   >
-                    {preset === bal ? `Full ${formatMoney(bal)}` : formatMoney(preset)}
+                    {preset === row.upadOutstandingPaise
+                      ? `Full (${formatMoney(row.upadOutstandingPaise)})`
+                      : preset === maxSalaryRecovery
+                        ? `Max Wage (${formatMoney(maxSalaryRecovery)})`
+                        : formatMoney(preset)}
                   </button>
-                ))
-              })()}
+                ))}
+              {recMethod === 'salary' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecAmount('0')
+                    setRecError('')
+                  }}
+                  className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-bold text-stone-500 hover:bg-stone-100 transition"
+                >
+                  Clear (₹0)
+                </button>
+              )}
             </div>
 
-            <Field label="Note" hint="Optional note">
-              <Input
-                placeholder="e.g. handed cash at counter"
-                value={returnNote}
-                onChange={(e) => setReturnNote(e.target.value)}
-              />
-            </Field>
+            {recMethod === 'cash' && (
+              <div>
+                <label className="block text-xs font-bold text-stone-700 uppercase tracking-wide mb-1">
+                  Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. handed cash at counter"
+                  value={recNote}
+                  onChange={(e) => setRecNote(e.target.value)}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:border-rose-600 focus:outline-none"
+                />
+              </div>
+            )}
 
-            {returnError && <div className="text-xs text-rose-600 font-medium">{returnError}</div>}
-
-            <Button
-              variant="secondary"
-              onClick={() => returnMutation.mutate()}
-              loading={returnMutation.isPending}
-              disabled={!returnAmount}
-              className="w-full text-sky-800 hover:bg-sky-50"
-            >
-              <RotateCcw className="h-4 w-4" />
-              <span>Record Cash Return</span>
-            </Button>
-          </div>
-        )}
-
-        {/* Tab 3: Salary Deduction / Recovery */}
-        {tab === 'recover' && (
-          <div className="space-y-3 rounded-2xl border border-stone-200 p-3.5 bg-white">
-            <Field
-              label="Cycle Wage Recovery (₹)"
-              hint={`Deducts from earned salary during cycle payout. Max: ${formatMoney(maxWageRecovery)}`}
-            >
-              <Input
-                inputMode="decimal"
-                placeholder="0"
-                value={recoveryVal}
-                onChange={(e) => setRecoveryVal(e.target.value)}
-              />
-            </Field>
-
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setRecoveryVal(paiseToInput(maxWageRecovery))}
-                className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-100"
-              >
-                Max Recoverable ({formatMoney(maxWageRecovery)})
-              </button>
-              <button
-                type="button"
-                onClick={() => setRecoveryVal('0')}
-                className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-semibold text-stone-500 hover:bg-stone-100"
-              >
-                Zero
-              </button>
-            </div>
+            {recError && (
+              <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                {recError}
+              </div>
+            )}
 
             <Button
-              variant="emerald"
-              onClick={handleSaveRecovery}
-              className="w-full"
+              variant={recMethod === 'salary' ? 'emerald' : 'secondary'}
+              size="lg"
+              onClick={handleExecuteRecoveryOrReturn}
+              loading={cashReturnMutation.isPending}
+              disabled={!recAmount}
+              className="w-full h-11 text-sm font-bold shadow-sm"
             >
-              <span>Apply Cycle Recovery</span>
+              <span>
+                {recMethod === 'salary'
+                  ? `Deduct ₹${recAmount || '0'} from Salary`
+                  : `Save ₹${recAmount || '0'} Cash Return`}
+              </span>
             </Button>
           </div>
         )}
 
         {/* Worker Upad History */}
-        <div className="space-y-2 border-t border-stone-200 pt-3">
-          <div className="flex items-center justify-between text-xs font-bold text-stone-700 uppercase tracking-wide">
+        <div className="border-t border-stone-200 pt-3">
+          <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-600 mb-2">
             <div className="flex items-center gap-1.5">
               <History className="h-3.5 w-3.5 text-stone-500" />
               <span>Recent Upad History</span>
             </div>
-            <span className="text-[10px] text-stone-400 font-normal">Last {sortedHistory.length} entries</span>
+            <span className="text-[11px] text-stone-400 font-normal">Last {sortedHistory.length}</span>
           </div>
 
           {sortedHistory.length > 0 ? (
-            <div className="space-y-1.5 max-h-44 overflow-y-auto">
-              {sortedHistory.map((entry) => (
+            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+              {sortedHistory.map((item) => (
                 <div
-                  key={entry.id}
-                  className="flex items-center justify-between rounded-xl border border-stone-100 bg-stone-50/70 px-3 py-1.5 text-xs"
+                  key={item.id}
+                  className="flex items-center justify-between py-2 px-3 rounded-xl bg-stone-50 border border-stone-100 text-xs"
                 >
                   <div className="flex items-center gap-2">
                     <span
                       className={clsx(
-                        'inline-flex items-center justify-center rounded px-1.5 py-0.2 text-[10px] font-bold uppercase',
-                        entry.kind === 'given'
+                        'rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase',
+                        item.kind === 'given'
                           ? 'bg-amber-100 text-amber-900'
-                          : entry.kind === 'returned'
-                            ? 'bg-sky-100 text-sky-900'
-                            : 'bg-emerald-100 text-emerald-900',
+                          : 'bg-emerald-100 text-emerald-900',
                       )}
                     >
-                      {entry.kind}
+                      {item.kind === 'given' ? 'Advance' : item.kind === 'returned' ? 'Cash Return' : 'Salary Rec.'}
                     </span>
-                    <span className="text-stone-700 font-medium">
-                      {entry.category === 'extra' ? 'Extra' : 'Regular'}
-                      {entry.note ? ` · ${entry.note}` : ''}
-                    </span>
-                    <span className="text-[10px] text-stone-400">{formatDateShort(entry.date)}</span>
+                    <span className="font-semibold text-stone-800">{item.note || 'Upad'}</span>
+                    <span className="text-stone-400 font-medium text-[11px]">{formatDateShort(item.date)}</span>
                   </div>
                   <span
                     className={clsx(
-                      'font-bold tabular-nums',
-                      entry.kind === 'given' ? 'text-amber-800' : 'text-emerald-700',
+                      'font-bold tabular-nums text-sm',
+                      item.kind === 'given' ? 'text-amber-800' : 'text-emerald-700',
                     )}
                   >
-                    {entry.kind === 'given' ? `+${formatMoney(entry.amount_paise)}` : `-${formatMoney(entry.amount_paise)}`}
+                    {item.kind === 'given' ? `+${formatMoney(item.amount_paise)}` : `-${formatMoney(item.amount_paise)}`}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-xs text-stone-400 py-2 text-center">
-              No recent upad transactions recorded.
-            </div>
+            <div className="text-xs text-stone-400 py-1.5 text-center">No recent transactions.</div>
           )}
         </div>
       </div>
