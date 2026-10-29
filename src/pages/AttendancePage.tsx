@@ -941,8 +941,17 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   <th className="sticky top-0 z-10 min-w-[5.8rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
                     Salary
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[6.2rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                  <th className="sticky top-0 z-10 min-w-[6rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
                     Upad
+                  </th>
+                  <th className="sticky top-0 z-10 min-w-[9.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                    Summary
+                  </th>
+                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                    Total Payable
+                  </th>
+                  <th className="sticky top-0 z-10 min-w-[8.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                    Save Payment
                   </th>
                 </tr>
               </thead>
@@ -1125,6 +1134,76 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                           <span>{row.upadOutstandingPaise > 0 ? formatMoney(row.upadOutstandingPaise) : '+ Upad'}</span>
                         </button>
                       </td>
+
+                      {/* 6. Summary Column */}
+                      <td className="border-b border-l border-stone-100 px-3 py-2 text-left">
+                        <div className="flex flex-col gap-0.5 text-[11px]">
+                          <div className="font-semibold text-stone-800">
+                            {row.daysWorked} d {row.otMinutes > 0 ? `· +${formatHours(row.otMinutes)} OT` : ''}
+                          </div>
+                          <div className="text-[10px] text-stone-500">
+                            Upad: <span className="font-medium text-amber-800">{formatMoney(row.upadOutstandingPaise)}</span>
+                            {row.upadRecoveryPaise > 0 && (
+                              <span className="text-emerald-700 ml-1 font-medium">(-{formatMoney(row.upadRecoveryPaise)})</span>
+                            )}
+                          </div>
+                          <div className="text-[9px] text-stone-400">
+                            Rem: {formatMoney(Math.max(0, row.upadOutstandingPaise - row.upadRecoveryPaise))}
+                            {row.openingPaise > 0 ? ` · +${formatMoney(row.openingPaise)} baki` : ''}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* 7. Total Payable Column */}
+                      <td className="border-b border-l border-stone-100 px-3 py-2 text-right">
+                        <div className="text-sm font-bold text-emerald-800 tabular-nums">
+                          {formatMoney(row.totalDuePaise, { showZero: true })}
+                        </div>
+                        <div className="mt-0.5 text-[10px] text-stone-500 tabular-nums">
+                          {row.paidPaise === row.totalDuePaise ? (
+                            <span className="text-emerald-700 font-medium">Paying full</span>
+                          ) : (
+                            <span className="text-amber-700 font-medium">
+                              Pay {formatMoney(row.paidPaise)} · Rem {formatMoney(row.closingPaise)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 8. Save / Confirm Column */}
+                      <td className="border-b border-l border-stone-100 px-3 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setWorkerModalRow(row)}
+                          className={clsx(
+                            'inline-flex items-center justify-center gap-1.5 w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold transition border select-none',
+                            row.closingPaise === 0 && row.totalDuePaise > 0
+                              ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 shadow-2xs'
+                              : row.closingPaise > 0
+                                ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 shadow-2xs'
+                                : 'border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100',
+                          )}
+                          title={`Click to confirm & save payment for ${employee.name}`}
+                        >
+                          {row.closingPaise === 0 && row.totalDuePaise > 0 ? (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+                              <span className="truncate">Paid {formatMoney(row.paidPaise)}</span>
+                            </>
+                          ) : row.closingPaise > 0 ? (
+                            <>
+                              <span className="font-bold text-amber-800 truncate">
+                                Pay {formatMoney(row.paidPaise)}
+                              </span>
+                              <span className="text-[10px] text-amber-700/80 shrink-0">
+                                ({formatMoney(row.closingPaise)} rem)
+                              </span>
+                            </>
+                          ) : (
+                            <span>Settled (₹0)</span>
+                          )}
+                        </button>
+                      </td>
                     </tr>
                   )
                 })}
@@ -1165,6 +1244,33 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   </td>
                   <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-amber-50/70 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
                     {totals.outstanding > 0 ? formatMoney(totals.outstanding, { showZero: true }) : '—'}
+                  </td>
+                  {/* Footer 6. Summary Totals */}
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-3 py-2 text-left text-[10px] font-semibold text-stone-800 tabular-nums">
+                    <div>{rows.reduce((sum, r) => sum + r.daysWorked, 0)} d total</div>
+                    <div className="text-stone-500 font-medium">
+                      Rec: {formatMoney(totals.recovery)} · Rem: {formatMoney(Math.max(0, totals.outstanding - totals.recovery))}
+                    </div>
+                  </td>
+                  {/* Footer 7. Total Payable Totals */}
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-emerald-50/70 px-3 py-2 text-right text-xs font-bold text-emerald-950 tabular-nums">
+                    <div>{formatMoney(totals.due, { showZero: true })}</div>
+                    <div className="text-[10px] font-medium text-emerald-800">
+                      Pay: {formatMoney(totals.paid)}
+                    </div>
+                  </td>
+                  {/* Footer 8. Save Button Totals */}
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-2 py-1.5 text-center">
+                    <Button
+                      size="sm"
+                      variant="emerald"
+                      onClick={() => setPreviewOpen(true)}
+                      disabled={!rows.length || !validRange}
+                      className="w-full text-xs font-bold py-1"
+                    >
+                      <Wallet className="h-3.5 w-3.5" />
+                      <span>Save All ({rows.length})</span>
+                    </Button>
                   </td>
                 </tr>
               </tfoot>
