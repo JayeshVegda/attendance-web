@@ -18,7 +18,7 @@ import {
   upadBalance,
 } from '../lib/engine'
 import { addDays, daysBetweenInclusive, formatDateLong, formatDateShort, todayKey } from '../lib/dates'
-import { calculateDenominations, formatMoney, parseMoneyInput, paiseToInput } from '../lib/money'
+import { calculateDenominations, formatMoney, parseMoneyInput, paiseToInput, formatHours } from '../lib/money'
 import { Avatar, Badge, Button, Card, Spinner } from '../components/ui'
 import { useToast } from '../components/Toast'
 import {
@@ -38,9 +38,12 @@ import type { Attendance } from '../lib/types'
 type RowInputState = {
   cr: string // Chalu recovery ₹
   mr: string // Main recovery ₹
-  ng: string // New upad given ₹
-  nb: 'chalu' | 'moto' // New upad bucket
+  ngChalu: string // New Chalu upad given ₹
+  ngMoto: string // New Main upad given ₹
+  adj: string // + / - Adjustment ₹ (Bonus or Deduction)
   sp: string // Salary paid ₹ (empty = full payable)
+  ng?: string // legacy fallback
+  nb?: 'chalu' | 'moto' // legacy fallback
 }
 
 const STATUS_LETTER: Record<string, string> = { full: 'P', half: 'H', absent: 'A' }
@@ -86,10 +89,13 @@ export default function PayoutScreen({
     }))
 
     return contextsQuery.data.map((ctx) => {
-      const inp = inputs[ctx.employee.id] || { cr: '', mr: '', ng: '', nb: 'chalu', sp: '' }
+      const inp = inputs[ctx.employee.id] || { cr: '', mr: '', ngChalu: '', ngMoto: '', adj: '', sp: '' }
       const crPaise = parseMoneyInput(inp.cr)
       const mrPaise = parseMoneyInput(inp.mr)
-      const ngPaise = parseMoneyInput(inp.ng)
+      const ngChaluPaise = parseMoneyInput(inp.ngChalu || (inp.nb === 'chalu' ? (inp.ng ?? '') : ''))
+      const ngMotoPaise = parseMoneyInput(inp.ngMoto || (inp.nb === 'moto' ? (inp.ng ?? '') : ''))
+      const adjPaise = parseMoneyInput(inp.adj)
+      const totalNewUpadPaise = ngChaluPaise + ngMotoPaise
 
       const hasActivity =
         ctx.attendance.some((a) => !a.settled && a.date <= cutoff) ||
@@ -117,8 +123,11 @@ export default function PayoutScreen({
       const baseMerged: PayoutInputs = {
         chalu_recovery_paise: crPaise,
         moto_recovery_paise: mrPaise,
-        new_upad_bucket: inp.nb || 'chalu',
-        new_upad_given_paise: ngPaise,
+        new_chalu_given_paise: ngChaluPaise,
+        new_moto_given_paise: ngMotoPaise,
+        new_upad_given_paise: totalNewUpadPaise,
+        new_upad_bucket: 'chalu',
+        payout_adjustment_paise: adjPaise,
         salary_paid_paise: 0,
       }
       const out = computePayout(
@@ -195,7 +204,7 @@ export default function PayoutScreen({
         warnings: comp.warnings,
         unmarkedDates: unmarked,
         salaryPaidPaise: spPaise,
-        cashToHandOverPaise: spPaise + ngPaise,
+        cashToHandOverPaise: spPaise + totalNewUpadPaise,
         closingCarryPaise: Math.max(0, netPayable - spPaise),
       }
     })
@@ -238,6 +247,9 @@ export default function PayoutScreen({
     let chaluRec = 0
     let motoRec = 0
     let newUpad = 0
+    let newChalu = 0
+    let newMoto = 0
+    let payoutAdj = 0
     let payable = 0
     let salaryPaid = 0
     let cashToHand = 0
@@ -253,6 +265,9 @@ export default function PayoutScreen({
       chaluRec += c.chalu_recovery_paise
       motoRec += c.moto_recovery_paise
       newUpad += c.new_upad_given_paise
+      newChalu += c.new_chalu_given_paise ?? 0
+      newMoto += c.new_moto_given_paise ?? 0
+      payoutAdj += c.payout_adjustment_paise ?? 0
       payable += c.payable_paise
       salaryPaid += r.salaryPaidPaise
       cashToHand += r.cashToHandOverPaise
@@ -268,6 +283,9 @@ export default function PayoutScreen({
       chaluRec,
       motoRec,
       newUpad,
+      newChalu,
+      newMoto,
+      payoutAdj,
       payable,
       salaryPaid,
       cashToHand,
@@ -285,7 +303,7 @@ export default function PayoutScreen({
 
   const setRowField = (empId: string, field: keyof RowInputState, val: string) => {
     setInputs((prev) => {
-      const cur = prev[empId] || { cr: '', mr: '', ng: '', nb: 'chalu', sp: '' }
+      const cur = prev[empId] || { cr: '', mr: '', ngChalu: '', ngMoto: '', adj: '', sp: '' }
       return { ...prev, [empId]: { ...cur, [field]: val } }
     })
   }
@@ -303,15 +321,22 @@ export default function PayoutScreen({
         cutoff,
         note: '',
         rows: cleanSelectedRows.map((r) => {
-          const inp = inputs[r.context.employee.id] || { cr: '', mr: '', ng: '', nb: 'chalu', sp: '' }
+          const inp = inputs[r.context.employee.id] || { cr: '', mr: '', ngChalu: '', ngMoto: '', adj: '', sp: '' }
+          const ngChaluPaise = parseMoneyInput(inp.ngChalu || (inp.nb === 'chalu' ? (inp.ng ?? '') : ''))
+          const ngMotoPaise = parseMoneyInput(inp.ngMoto || (inp.nb === 'moto' ? (inp.ng ?? '') : ''))
+          const adjPaise = parseMoneyInput(inp.adj)
+          const totalNewUpad = ngChaluPaise + ngMotoPaise
           return {
             context: r.context,
             inputs: {
               ...EMPTY_INPUTS,
               chalu_recovery_paise: parseMoneyInput(inp.cr),
               moto_recovery_paise: parseMoneyInput(inp.mr),
-              new_upad_bucket: inp.nb || 'chalu',
-              new_upad_given_paise: parseMoneyInput(inp.ng),
+              new_chalu_given_paise: ngChaluPaise,
+              new_moto_given_paise: ngMotoPaise,
+              new_upad_given_paise: totalNewUpad,
+              new_upad_bucket: 'chalu',
+              payout_adjustment_paise: adjPaise,
               salary_paid_paise: r.salaryPaidPaise,
             },
           }
@@ -537,7 +562,7 @@ export default function PayoutScreen({
                 >
                   {/* Card Header: Worker Identity & Quick Status */}
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-2 mb-2.5">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <input
                         type="checkbox"
                         checked={isTicked}
@@ -547,7 +572,7 @@ export default function PayoutScreen({
                       <button
                         type="button"
                         onClick={() => setInspectingWorkerId(emp.id)}
-                        className="flex items-center gap-2 text-left group hover:text-emerald-700"
+                        className="flex flex-wrap items-center gap-1.5 text-left group hover:text-emerald-700 cursor-pointer"
                         title="Click to view daily attendance and ledger"
                       >
                         <span className="text-sm font-black text-stone-900 group-hover:text-emerald-700">
@@ -557,6 +582,32 @@ export default function PayoutScreen({
                         <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold text-stone-600">
                           ₹{emp.daily_rate_paise / 100}/d
                         </span>
+                        {c && c.day_breakdown.length > 0 && (() => {
+                          const fullCount = c.day_breakdown.filter((d) => d.status === 'full').length
+                          const halfCount = c.day_breakdown.filter((d) => d.status === 'half').length
+                          const absentCount = c.day_breakdown.filter((d) => d.status === 'absent').length
+                          const cycleDays = c.day_breakdown.length
+                          const daysWorked = fullCount + halfCount * 0.5
+                          const otMins = c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0)
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-md bg-stone-100 border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-bold text-stone-700 tracking-tight"
+                              title={`Cycle ${cycleDays} days: ${fullCount} Present, ${halfCount} Half, ${absentCount} Absent, ${formatHours(otMins)} Overtime`}
+                            >
+                              <span className="text-stone-900 font-extrabold">{daysWorked}/{cycleDays}d</span>
+                              <span className="text-stone-300">·</span>
+                              <span className="text-emerald-700">{fullCount}P</span>
+                              {halfCount > 0 && <span className="text-amber-700">{halfCount}H</span>}
+                              {absentCount > 0 && <span className="text-rose-700">{absentCount}A</span>}
+                              {otMins > 0 && (
+                                <>
+                                  <span className="text-stone-300">·</span>
+                                  <span className="text-teal-800 font-black">+{formatHours(otMins)} OT</span>
+                                </>
+                              )}
+                            </span>
+                          )
+                        })()}
                       </button>
 
                       {isInactive && (
@@ -647,7 +698,12 @@ export default function PayoutScreen({
                     <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-2.5 flex flex-col justify-between space-y-1.5">
                       <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-amber-900 border-b border-amber-200/60 pb-1">
                         <span>2. Loan Deductions (ઉપાડ કપાત)</span>
-                        <span>Cut Today</span>
+                        <span
+                          className="font-bold text-amber-950 tabular-nums normal-case text-[11px]"
+                          title={`Chalu: ${formatMoney(c ? c.chalu_after_paise : 0)} + Main: ${formatMoney(c ? c.moto_after_paise : 0)}`}
+                        >
+                          Remaining: <strong>{formatMoney(c ? c.chalu_after_paise + c.moto_after_paise : 0)}</strong>
+                        </span>
                       </div>
 
                       <div className="space-y-1.5">
@@ -740,35 +796,49 @@ export default function PayoutScreen({
                       </div>
 
                       <div className="space-y-1.5">
-                        {/* New Upad Advance */}
+                        {/* New Chalu Upad */}
                         <div className="flex items-center justify-between gap-1">
                           <span className="text-[11px] font-semibold text-emerald-950">
-                            Give New Upad:
+                            New Chalu Upad:
                           </span>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="0"
-                              value={inp.ng}
-                              onChange={(e) => setRowField(emp.id, 'ng', e.target.value)}
-                              className="h-7 w-20 px-1.5 text-right font-black text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRowField(emp.id, 'nb', inp.nb === 'moto' ? 'chalu' : 'moto')
-                              }
-                              className={`text-[9px] font-extrabold px-1.5 py-1 rounded border ${
-                                inp.nb === 'moto'
-                                  ? 'bg-purple-100 text-purple-900 border-purple-300'
-                                  : 'bg-white text-stone-800 border-stone-300'
-                              }`}
-                              title="Toggle bucket"
-                            >
-                              {inp.nb === 'moto' ? 'Main' : 'Chalu'}
-                            </button>
-                          </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={inp.ngChalu ?? ''}
+                            onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
+                            className="h-7 w-24 px-1.5 text-right font-black text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* New Main Upad */}
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] font-semibold text-emerald-950">
+                            New Main Upad:
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={inp.ngMoto ?? ''}
+                            onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
+                            className="h-7 w-24 px-1.5 text-right font-black text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Adjustment (+/-) */}
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-[11px] font-semibold text-emerald-950">
+                            Adjustment (+/-):
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="+Bonus / -Fine"
+                            value={inp.adj ?? ''}
+                            onChange={(e) => setRowField(emp.id, 'adj', e.target.value)}
+                            className="h-7 w-28 px-1.5 text-right font-black text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none placeholder:text-[10px] placeholder:font-normal"
+                            title="Add bonus (e.g. 500) or deduction (e.g. -200)"
+                          />
                         </div>
 
                         {/* Salary Paid */}
@@ -783,7 +853,7 @@ export default function PayoutScreen({
                               placeholder={c ? paiseToInput(c.payable_paise) : '0'}
                               value={inp.sp}
                               onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
-                              className="h-7 w-20 px-1.5 text-right font-black text-xs rounded border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                              className="h-7 w-24 px-1.5 text-right font-black text-xs rounded border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
                               title="Leave blank to pay full payable amount"
                             />
                             {inp.sp !== '' && (
@@ -804,6 +874,12 @@ export default function PayoutScreen({
                         <div>
                           <div className="text-[9px] uppercase font-bold tracking-wider text-emerald-200">
                             CASH TO HAND (હાથમાં રોકડ)
+                          </div>
+                          <div className="text-[9px] text-emerald-100/90 font-medium">
+                            {r.salaryPaidPaise > 0 && `${formatMoney(r.salaryPaidPaise)} Sal`}
+                            {parseMoneyInput(inp.ngChalu) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngChalu))} Chalu`}
+                            {parseMoneyInput(inp.ngMoto) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngMoto))} Main`}
+                            {parseMoneyInput(inp.adj) !== 0 && ` (${parseMoneyInput(inp.adj) > 0 ? '+' : ''}${formatMoney(parseMoneyInput(inp.adj))} Adj)`}
                           </div>
                           {c && r.closingCarryPaise > 0 && (
                             <div className="text-[10px] text-amber-200 font-semibold">
@@ -850,7 +926,7 @@ export default function PayoutScreen({
                 >
                   Moto Loan (મોટો)
                 </th>
-                <th colSpan={6} className="py-1 px-2.5 text-center bg-emerald-50/50 text-emerald-950">
+                <th colSpan={8} className="py-1 px-2.5 text-center bg-emerald-50/50 text-emerald-950">
                   Settlement & Cash Handover (ચૂકવણી)
                 </th>
               </tr>
@@ -918,9 +994,21 @@ export default function PayoutScreen({
                 </th>
                 <th
                   className="py-1.5 px-2 text-center whitespace-nowrap"
-                  title="Give new upad cash today"
+                  title="Give new Chalu upad cash today"
                 >
-                  New Upad ₹
+                  New Chalu ₹
+                </th>
+                <th
+                  className="py-1.5 px-2 text-center whitespace-nowrap"
+                  title="Give new Main upad cash today"
+                >
+                  New Main ₹
+                </th>
+                <th
+                  className="py-1.5 px-2 text-center whitespace-nowrap"
+                  title="Adjustment: +Bonus or -Fine"
+                >
+                  Adj (+/-) ₹
                 </th>
                 <th
                   className="py-1.5 px-2 text-center whitespace-nowrap bg-sky-50/70 border-x border-sky-200 text-sky-900"
@@ -930,7 +1018,7 @@ export default function PayoutScreen({
                 </th>
                 <th
                   className="py-1.5 px-2.5 text-right whitespace-nowrap font-black text-emerald-900 bg-emerald-100/70 border-r border-emerald-200"
-                  title="Physical cash to hand over: Salary Paid + New Upad"
+                  title="Physical cash to hand over: Salary Paid + New Upads"
                 >
                   Cash to Hand
                 </th>
@@ -990,7 +1078,7 @@ export default function PayoutScreen({
                         <button
                           type="button"
                           onClick={() => setInspectingWorkerId(emp.id)}
-                          className="flex items-center gap-1 text-left group hover:text-emerald-700"
+                          className="flex flex-wrap items-center gap-1 text-left group hover:text-emerald-700 cursor-pointer"
                           title="Click to view full attendance & upad ledger breakdown"
                         >
                           <span className="font-black text-stone-900 group-hover:text-emerald-700 truncate max-w-[130px]">
@@ -1002,6 +1090,18 @@ export default function PayoutScreen({
                               Inactive
                             </span>
                           )}
+                          {c && c.day_breakdown.length > 0 && (() => {
+                            const fullCount = c.day_breakdown.filter((d) => d.status === 'full').length
+                            const halfCount = c.day_breakdown.filter((d) => d.status === 'half').length
+                            const cycleDays = c.day_breakdown.length
+                            const daysWorked = fullCount + halfCount * 0.5
+                            const otMins = c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0)
+                            return (
+                              <span className="text-[9px] font-bold text-stone-600 bg-stone-100 px-1 rounded">
+                                {daysWorked}/{cycleDays}d{otMins > 0 ? ` +${formatHours(otMins)}` : ''}
+                              </span>
+                            )
+                          })()}
                           <Info className="h-3 w-3 text-stone-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                         </button>
                       </div>
@@ -1144,34 +1244,40 @@ export default function PayoutScreen({
                       {c ? formatMoney(c.payable_paise) : '—'}
                     </td>
 
-                    {/* 10. New Upad Given ₹ */}
+                    {/* 10. New Chalu Upad ₹ */}
                     <td className="py-0.5 px-1 text-center">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          value={inp.ng}
-                          onChange={(e) => setRowField(emp.id, 'ng', e.target.value)}
-                          className="h-6.5 w-15 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRowField(emp.id, 'nb', inp.nb === 'moto' ? 'chalu' : 'moto')
-                          }
-                          className={`text-[9px] font-extrabold px-1 py-0.5 rounded border ${
-                            inp.nb === 'moto'
-                              ? 'bg-purple-50 text-purple-800 border-purple-200'
-                              : 'bg-stone-50 text-stone-700 border-stone-200'
-                          }`}
-                          title={`New upad added to ${
-                            inp.nb === 'moto' ? 'Moto' : 'Chalu'
-                          }. Click to toggle.`}
-                        >
-                          {inp.nb === 'moto' ? 'M' : 'C'}
-                        </button>
-                      </div>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={inp.ngChalu ?? ''}
+                        onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
+                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* 11. New Main Upad ₹ */}
+                    <td className="py-0.5 px-1 text-center">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={inp.ngMoto ?? ''}
+                        onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
+                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                      />
+                    </td>
+
+                    {/* 12. Adjustment (+/-) ₹ */}
+                    <td className="py-0.5 px-1 text-center">
+                      <input
+                        type="text"
+                        placeholder="0"
+                        value={inp.adj ?? ''}
+                        onChange={(e) => setRowField(emp.id, 'adj', e.target.value)}
+                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                        title="Enter positive for bonus, negative for deduction"
+                      />
                     </td>
 
                     {/* 11. Salary Paid ₹ */}
@@ -1281,8 +1387,18 @@ export default function PayoutScreen({
                 <td className="py-1.5 px-2.5 text-right font-black text-stone-950 bg-stone-200/70 border-r border-stone-200">
                   {formatMoney(totals.payable)}
                 </td>
+                <td className="py-1.5 px-2 text-center text-emerald-800">
+                  {totals.newChalu > 0 ? `+${formatMoney(totals.newChalu)}` : '—'}
+                </td>
+                <td className="py-1.5 px-2 text-center text-purple-800">
+                  {totals.newMoto > 0 ? `+${formatMoney(totals.newMoto)}` : '—'}
+                </td>
                 <td className="py-1.5 px-2 text-center text-stone-800">
-                  {totals.newUpad > 0 ? `+${formatMoney(totals.newUpad)}` : '—'}
+                  {totals.payoutAdj !== 0
+                    ? totals.payoutAdj > 0
+                      ? `+${formatMoney(totals.payoutAdj)}`
+                      : formatMoney(totals.payoutAdj)
+                    : '—'}
                 </td>
                 <td className="py-1.5 px-2 text-center bg-sky-100/60 border-x border-sky-200 text-sky-950 font-bold">
                   {formatMoney(totals.salaryPaid)}

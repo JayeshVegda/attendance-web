@@ -387,4 +387,44 @@ describe("spec worked cases", () => {
     const bal = upadBalance(rows, "chalu", 0);
     expect(bal).toBe(30000);
   });
+
+  it("case 23 — new chalu and main upad boxes update respective balances and cash to hand", () => {
+    const r = run(
+      worker({ opening_carry_paise: 0, opening_date: "2026-10-01" }),
+      "2026-10-02",
+      RATE_500,
+      FULL_PERIOD,
+      [att("2026-10-01", "full"), att("2026-10-02", "full")],
+      [],
+      [],
+      {
+        new_chalu_given_paise: 50000, // ₹500 Chalu
+        new_moto_given_paise: 200000, // ₹2,000 Main
+        salary_paid_paise: 100000, // ₹1,000
+      }
+    );
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.result.earned_paise).toBe(100000);
+    expect(r.result.chalu_after_paise).toBe(50000);
+    expect(r.result.moto_after_paise).toBe(200000);
+    expect(r.result.cash_to_hand_over_paise).toBe(250000); // payable (0) + newUpad (250000)
+  });
+
+  it("case 24 — payout adjustment adds bonus or subtracts deduction", () => {
+    const r = run(
+      worker({ opening_carry_paise: 0, opening_date: "2026-10-01" }),
+      "2026-10-02",
+      RATE_500,
+      FULL_PERIOD,
+      [att("2026-10-01", "full"), att("2026-10-02", "full")],
+      [],
+      [],
+      {
+        payout_adjustment_paise: 50000, // +₹500 bonus
+      }
+    );
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    expect(r.result.total_due_paise).toBe(150000); // 100000 + 50000
+    expect(r.result.payable_paise).toBe(150000);
+  });
 });

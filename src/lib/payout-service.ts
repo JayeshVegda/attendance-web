@@ -77,6 +77,9 @@ export const EMPTY_INPUTS: PayoutInputs = {
   salary_paid_paise: 0,
   new_upad_bucket: 'chalu',
   new_upad_given_paise: 0,
+  new_chalu_given_paise: 0,
+  new_moto_given_paise: 0,
+  payout_adjustment_paise: 0,
 }
 
 function kindOf(a: Adjustment): AdjustmentKind {
@@ -335,17 +338,43 @@ export async function savePayout(input: SavePayoutInput): Promise<{ runId: strin
         payout: runId,
         voided: false,
       })).id)
-      if (res.new_upad_given_paise > 0) upadIds.push((await pb.collection(COLLECTIONS.upad).create({
+      const newChalu = res.new_chalu_given_paise ?? (res.new_upad_bucket === 'chalu' ? res.new_upad_given_paise : 0)
+      const newMoto = res.new_moto_given_paise ?? (res.new_upad_bucket === 'moto' ? res.new_upad_given_paise : 0)
+
+      if (newChalu > 0) upadIds.push((await pb.collection(COLLECTIONS.upad).create({
         employee: row.context.employee.id,
         date: formattedPayoutDate,
         kind: 'given',
-        category: res.new_upad_bucket,
-        bucket: res.new_upad_bucket,
-        amount_paise: res.new_upad_given_paise,
-        note: '',
+        category: 'chalu',
+        bucket: 'chalu',
+        amount_paise: newChalu,
+        note: 'Payout advance',
         payout: runId,
         voided: false,
       })).id)
+
+      if (newMoto > 0) upadIds.push((await pb.collection(COLLECTIONS.upad).create({
+        employee: row.context.employee.id,
+        date: formattedPayoutDate,
+        kind: 'given',
+        category: 'moto',
+        bucket: 'moto',
+        amount_paise: newMoto,
+        note: 'Payout advance',
+        payout: runId,
+        voided: false,
+      })).id)
+
+      if (row.inputs.payout_adjustment_paise && row.inputs.payout_adjustment_paise !== 0) {
+        await pb.collection(COLLECTIONS.adjustments).create({
+          employee: row.context.employee.id,
+          date: formattedPayoutDate,
+          amount_paise: row.inputs.payout_adjustment_paise,
+          kind: row.inputs.payout_adjustment_paise > 0 ? 'bonus' : 'deduction',
+          note: row.inputs.payout_adjustment_paise > 0 ? 'Payout bonus' : 'Payout deduction',
+          settled_payout: runId,
+        })
+      }
 
       for (const att of row.context.attendance) {
         if (!att.settled && att.date <= input.cutoff) {

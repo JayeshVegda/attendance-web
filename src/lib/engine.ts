@@ -56,8 +56,11 @@ export type PayoutInputs = {
   chalu_recovery_paise: Paise;
   moto_recovery_paise: Paise;
   salary_paid_paise: Paise;
-  new_upad_bucket: Bucket;
-  new_upad_given_paise: Paise;
+  new_upad_bucket?: Bucket;
+  new_upad_given_paise?: Paise;
+  new_chalu_given_paise?: Paise;
+  new_moto_given_paise?: Paise;
+  payout_adjustment_paise?: Paise;
 };
 
 export type DayBreakdownRow = {
@@ -88,6 +91,9 @@ export type PayoutComputation = {
   payable_paise: Paise;
   new_upad_bucket: Bucket;
   new_upad_given_paise: Paise;
+  new_chalu_given_paise?: Paise;
+  new_moto_given_paise?: Paise;
+  payout_adjustment_paise?: Paise;
   cash_to_hand_over_paise: Paise;
   closing_carry_paise: Paise;
   chalu_after_paise: Paise;
@@ -295,6 +301,8 @@ export function computePayout(
   );
   let adjustmentsSum = 0;
   for (const a of [...adjs, ...lateAdjs]) adjustmentsSum += adjustmentSigned(a);
+  const extraAdj = inputs.payout_adjustment_paise ?? 0;
+  adjustmentsSum += extraAdj;
 
   const carry = worker.opening_carry_paise;
   const totalDue = carry + earned + adjustmentsSum;
@@ -339,9 +347,11 @@ export function computePayout(
   const lateCount = breakdown.filter((b) => b.is_late_entry).length;
   if (lateCount > 0) warnings.push({ code: "late_entries", count: lateCount });
 
-  const newUpad = inputs.new_upad_given_paise;
-  const chaluAfter = chaluBalance - Math.max(0, inputs.chalu_recovery_paise) + (inputs.new_upad_bucket === "chalu" ? newUpad : 0);
-  const motoAfter = motoBalance - Math.max(0, inputs.moto_recovery_paise) + (inputs.new_upad_bucket === "moto" ? newUpad : 0);
+  const newChalu = inputs.new_chalu_given_paise ?? (inputs.new_upad_bucket === "chalu" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  const newMoto = inputs.new_moto_given_paise ?? (inputs.new_upad_bucket === "moto" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  const totalNewUpad = newChalu + newMoto;
+  const chaluAfter = chaluBalance - Math.max(0, inputs.chalu_recovery_paise) + newChalu;
+  const motoAfter = motoBalance - Math.max(0, inputs.moto_recovery_paise) + newMoto;
 
   return {
     ok: true,
@@ -360,9 +370,12 @@ export function computePayout(
       moto_recovery_paise: Math.max(0, inputs.moto_recovery_paise),
       salary_paid_paise: inputs.salary_paid_paise,
       payable_paise: payable,
-      new_upad_bucket: inputs.new_upad_bucket,
-      new_upad_given_paise: newUpad,
-      cash_to_hand_over_paise: payable + newUpad,
+      new_upad_bucket: inputs.new_upad_bucket ?? "chalu",
+      new_upad_given_paise: totalNewUpad,
+      new_chalu_given_paise: newChalu,
+      new_moto_given_paise: newMoto,
+      payout_adjustment_paise: extraAdj,
+      cash_to_hand_over_paise: payable + totalNewUpad,
       closing_carry_paise: payable,
       chalu_after_paise: chaluAfter,
       moto_after_paise: motoAfter,
