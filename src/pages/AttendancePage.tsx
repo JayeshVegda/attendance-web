@@ -872,7 +872,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               </Button>
             </div>
 
-            <div className="table-scroll max-h-[calc(100vh-23rem)] pb-24">
+            <div className="overflow-x-auto">
             <table className="w-full min-w-max border-separate border-spacing-0 text-xs attendance-grid">
               <thead>
                 <tr>
@@ -1217,17 +1217,17 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                 })}
               </tbody>
 
-              {/* Table Footer Totals (Opaque background so text never bleeds through) */}
+              {/* Table Footer Totals */}
               <tfoot>
-                <tr className="bg-stone-100 font-bold text-stone-900 border-t border-stone-300">
-                  <td className="sticky bottom-0 left-0 z-30 border-t border-stone-300 bg-stone-100 px-3.5 py-2.5 text-xs uppercase tracking-wider text-stone-800 shadow-[1px_0_0_0_#cbd5e1]">
+                <tr className="bg-stone-100 font-bold text-stone-900 border-t-2 border-stone-300">
+                  <td className="sticky left-0 z-20 border-t-2 border-stone-300 bg-stone-100 px-3.5 py-2.5 text-xs uppercase tracking-wider text-stone-800 shadow-[1px_0_0_0_#cbd5e1] whitespace-nowrap">
                     Cycle Total ({rows.length})
                   </td>
 
                   {dailyTotals.map((total, index) => (
                     <td
                       key={days[index]}
-                      className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-1 py-1.5 text-center"
+                      className="border-l border-t-2 border-stone-300 bg-stone-100 px-1 py-1.5 text-center"
                     >
                       <div className="text-[10px] font-bold text-stone-800 tabular-nums">
                         {total.present} P
@@ -1238,7 +1238,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                     </td>
                   ))}
 
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-2 py-2 text-center text-xs font-bold text-stone-800 tabular-nums">
+                  <td className="border-l border-t-2 border-stone-300 bg-stone-100 px-2 py-2 text-center text-xs font-bold text-stone-800 tabular-nums">
                     <div>{rows.reduce((sum, r) => sum + r.daysWorked, 0)} d</div>
                     {rows.reduce((sum, r) => sum + r.otMinutes, 0) > 0 && (
                       <div className="text-[10px] text-emerald-800 font-semibold">
@@ -1247,13 +1247,13 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                     )}
                   </td>
 
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-2.5 py-2 text-right text-xs font-bold text-stone-950 tabular-nums">
+                  <td className="border-l border-t-2 border-stone-300 bg-stone-100 px-2.5 py-2 text-right text-xs font-bold text-stone-950 tabular-nums">
                     {formatMoney(totals.opening + totals.earned + totals.adjustment, { showZero: true })}
                   </td>
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-amber-100 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
+                  <td className="border-l border-t-2 border-stone-300 bg-amber-100 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
                     {totals.outstanding > 0 ? formatMoney(totals.outstanding, { showZero: true }) : '—'}
                   </td>
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-emerald-100 px-3 py-2 text-center">
+                  <td className="border-l border-t-2 border-stone-300 bg-emerald-100 px-3 py-2 text-center">
                     <button
                       type="button"
                       onClick={() => onNavigate('payout')}
