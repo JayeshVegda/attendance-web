@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import clsx from 'clsx'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   EMPTY_INPUTS,
@@ -506,15 +507,7 @@ export default function PayoutScreen({
         </div>
       )}
 
-      {/* Payout Reminder if overdue */}
-      {daysSinceLastPayout !== null && daysSinceLastPayout >= 4 && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
-          <TriangleAlert className="h-3.5 w-3.5 text-amber-700 shrink-0" />
-          <span>
-            Last payout was <strong>{daysSinceLastPayout} days ago</strong> on {formatDateLong(latestRun!.payout_date)}.
-          </span>
-        </div>
-      )}
+
 
       {/* 2. Main Payout View: Cards or Table */}
       {viewMode === 'cards' ? (
@@ -623,6 +616,58 @@ export default function PayoutScreen({
                           )
                         })()}
                       </button>
+
+                      {/* Daily Attendance Pills: e.g. 27/10 P, 28/10 H, 29/10 P + 3 */}
+                      {c && c.day_breakdown.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1 pl-1 border-l border-stone-200">
+                          {c.day_breakdown.map((d) => {
+                            const isFull = d.status === 'full'
+                            const isHalf = d.status === 'half'
+                            const isAbsent = d.status === 'absent'
+                            const hasOt = d.ot_minutes > 0
+                            const statusLetter = isFull ? 'P' : isHalf ? 'H' : isAbsent ? 'A' : '—'
+                            const parts = d.date.slice(0, 10).split('-')
+                            const dateLabel =
+                              parts.length === 3
+                                ? `${parseInt(parts[2], 10)}/${parseInt(parts[1], 10)}`
+                                : d.date
+                            const otLabel = hasOt
+                              ? `+ ${d.ot_minutes % 60 === 0 ? `${d.ot_minutes / 60}` : formatHours(d.ot_minutes)}`
+                              : ''
+                            return (
+                              <button
+                                key={d.date}
+                                type="button"
+                                onClick={() => setInspectingWorkerId(emp.id)}
+                                className={clsx(
+                                  'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold border transition-all cursor-pointer select-none',
+                                  isFull && !hasOt && 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100',
+                                  isFull && hasOt && 'bg-emerald-100 text-emerald-950 border-emerald-300 ring-1 ring-emerald-400/30 hover:bg-emerald-200',
+                                  isHalf && 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100',
+                                  isAbsent && 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100',
+                                  !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-400 border-stone-200 hover:bg-stone-100',
+                                )}
+                                title={`${d.date}: ${isFull ? 'Present' : isHalf ? 'Half day' : isAbsent ? 'Absent' : 'Unmarked'}${hasOt ? ` (+${formatHours(d.ot_minutes)} OT)` : ''}`}
+                              >
+                                <span className="text-stone-500 font-medium">{dateLabel}</span>
+                                <span
+                                  className={clsx(
+                                    'font-black',
+                                    isFull ? 'text-emerald-800' : isHalf ? 'text-amber-800' : isAbsent ? 'text-rose-800' : 'text-stone-400'
+                                  )}
+                                >
+                                  {statusLetter}
+                                </span>
+                                {hasOt && (
+                                  <span className="font-black text-emerald-900 bg-emerald-200/90 px-0.5 rounded text-[9px] tabular-nums">
+                                    {otLabel}
+                                  </span>
+                                )}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
 
                       {isInactive && (
                         <span className="rounded bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
@@ -809,77 +854,76 @@ export default function PayoutScreen({
                         </span>
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-2">
                         {/* New Chalu Upad */}
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-semibold text-emerald-950">
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[10px] font-bold text-emerald-950">
                             New Chalu Upad:
-                          </span>
+                          </label>
                           <input
                             type="text"
                             inputMode="decimal"
                             placeholder="0"
                             value={inp.ngChalu ?? ''}
                             onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
-                            className="h-7 w-24 px-1.5 text-right font-black text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                            className="h-7 w-full px-2 text-right font-black text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
                           />
                         </div>
 
                         {/* New Main Upad */}
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-semibold text-emerald-950">
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[10px] font-bold text-purple-950">
                             New Main Upad:
-                          </span>
+                          </label>
                           <input
                             type="text"
                             inputMode="decimal"
                             placeholder="0"
                             value={inp.ngMoto ?? ''}
                             onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
-                            className="h-7 w-24 px-1.5 text-right font-black text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                            className="h-7 w-full px-2 text-right font-black text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
                           />
                         </div>
 
                         {/* Adjustment (+/-) */}
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-semibold text-emerald-950">
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[10px] font-bold text-stone-700">
                             Adjustment (+/-):
-                          </span>
+                          </label>
                           <input
                             type="text"
                             placeholder="+Bonus / -Fine"
                             value={inp.adj ?? ''}
                             onChange={(e) => setRowField(emp.id, 'adj', e.target.value)}
-                            className="h-7 w-28 px-1.5 text-right font-black text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none placeholder:text-[10px] placeholder:font-normal"
+                            className="h-7 w-full px-2 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none placeholder:text-[9px] placeholder:font-normal"
                             title="Add bonus (e.g. 500) or deduction (e.g. -200)"
                           />
                         </div>
 
                         {/* Salary Paid */}
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[11px] font-semibold text-emerald-950">
-                            Salary Paid:
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder={c ? paiseToInput(c.payable_paise) : '0'}
-                              value={inp.sp}
-                              onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
-                              className="h-7 w-24 px-1.5 text-right font-black text-xs rounded border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
-                              title="Leave blank to pay full payable amount"
-                            />
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-emerald-950">
+                            <span>Salary Paid:</span>
                             {inp.sp !== '' && (
                               <button
                                 type="button"
                                 onClick={() => setRowField(emp.id, 'sp', '')}
-                                className="text-[9px] font-bold text-emerald-900 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300 bg-white"
+                                className="text-[9px] font-bold text-emerald-800 hover:underline cursor-pointer"
+                                title="Reset to full payable amount"
                               >
                                 Full
                               </button>
                             )}
                           </div>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder={c ? paiseToInput(c.payable_paise) : '0'}
+                            value={inp.sp}
+                            onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
+                            className="h-7 w-full px-2 text-right font-black text-xs rounded border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                            title="Leave blank to pay full payable amount"
+                          />
                         </div>
                       </div>
 
