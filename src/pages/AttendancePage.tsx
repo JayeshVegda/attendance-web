@@ -692,7 +692,8 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               const { employee } = row
               const record = attendanceMap.get(keyFor(employee.id, today))
               const status = record?.status
-              const hasOt = record && record.ot_minutes > 0
+              const otMinutes = record?.ot_minutes ?? 0
+              const isCustomOt = otMinutes > 0 && ![60, 120, 180, 240].includes(otMinutes)
 
               return (
                 <div
@@ -740,7 +741,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   </div>
 
                   {/* 1-Tap Mark Buttons */}
-                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                  <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end sm:self-auto">
                     <button
                       type="button"
                       onClick={() =>
@@ -810,20 +811,64 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                       <span>Absent</span>
                     </button>
 
-                    {/* Overtime & Note Button (Fixed Width so P/H/A buttons align across rows) */}
-                    <button
-                      type="button"
-                      onClick={() => setEditor({ employeeId: employee.id, date: today })}
-                      className={clsx(
-                        'flex items-center justify-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all border w-24 shrink-0',
-                        hasOt
-                          ? 'border-stone-900 bg-stone-900 text-white'
-                          : 'border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:text-stone-800',
-                      )}
-                      title="Add overtime or note"
-                    >
-                      <span className="truncate">{hasOt ? `+${formatHours(record.ot_minutes)} OT` : '+ OT'}</span>
-                    </button>
+                    {/* OT Options: 1, 2, 3, 4, +OT */}
+                    <div className="inline-flex items-center rounded-xl border border-stone-200 bg-stone-50/80 p-0.5 shrink-0 shadow-2xs">
+                      <span className="px-1.5 text-[10px] font-extrabold uppercase tracking-wider text-stone-400 select-none hidden sm:inline">
+                        OT
+                      </span>
+                      {[1, 2, 3, 4].map((hours) => {
+                        const minutes = hours * 60
+                        const isSelected = otMinutes === minutes
+                        return (
+                          <button
+                            key={hours}
+                            type="button"
+                            onClick={() => {
+                              const nextOt = isSelected ? 0 : minutes
+                              saveMutation.mutate({
+                                employeeId: employee.id,
+                                date: today,
+                                status: record?.status === 'absent' || !record?.status ? 'full' : record.status,
+                                otMinutes: nextOt,
+                                existingId: record?.id,
+                                note: record?.note,
+                              })
+                            }}
+                            className={clsx(
+                              'h-7 min-w-[1.75rem] px-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center select-none cursor-pointer',
+                              isSelected
+                                ? 'bg-stone-900 text-white shadow-xs'
+                                : 'text-stone-700 hover:bg-stone-200/80 hover:text-stone-950',
+                            )}
+                            title={`${hours} hr OT (${minutes}m) · Click to ${isSelected ? 'remove' : 'apply'}`}
+                          >
+                            {hours}
+                          </button>
+                        )
+                      })}
+
+                      <button
+                        type="button"
+                        onClick={() => setEditor({ employeeId: employee.id, date: today })}
+                        className={clsx(
+                          'h-7 rounded-lg px-2 text-xs font-bold transition-all flex items-center justify-center gap-1 border-l border-stone-200/80 select-none cursor-pointer',
+                          isCustomOt
+                            ? 'bg-stone-900 text-white shadow-xs'
+                            : 'text-stone-600 hover:bg-stone-200/80 hover:text-stone-900',
+                        )}
+                        title={record?.note ? `Note: ${record.note}` : 'Custom OT & note'}
+                      >
+                        <span>{isCustomOt ? `+${formatHours(otMinutes)}` : '+OT'}</span>
+                        {record?.note && (
+                          <span
+                            className={clsx(
+                              'h-1.5 w-1.5 rounded-full',
+                              isCustomOt ? 'bg-amber-300' : 'bg-emerald-600',
+                            )}
+                          />
+                        )}
+                      </button>
+                    </div>
 
                     {/* Quick Give Upad */}
                     <button
