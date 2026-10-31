@@ -5,7 +5,6 @@ import {
   formatEngineError,
   loadWorkerContexts,
   savePayout,
-  type PreviewRow,
   type WorkerContext,
 } from '../lib/payout-service'
 import {
@@ -13,7 +12,6 @@ import {
   type DayStatus,
   type EngineError,
   type EngineWarning,
-  type PayoutComputation,
   type PayoutInputs,
   computePayout,
   unmarkedDaysFor,
@@ -21,9 +19,18 @@ import {
 } from '../lib/engine'
 import { addDays, daysBetweenInclusive, formatDateLong, formatDateShort, todayKey } from '../lib/dates'
 import { calculateDenominations, formatMoney, parseMoneyInput, paiseToInput } from '../lib/money'
-import { Avatar, Badge, Button, Card, EmptyState, Spinner } from '../components/ui'
+import { Avatar, Badge, Button, Card, Spinner } from '../components/ui'
 import { useToast } from '../components/Toast'
-import { CheckCircle2, ChevronDown, ChevronRight, TriangleAlert, Wallet } from 'lucide-react'
+import {
+  Banknote,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Info,
+  TriangleAlert,
+  Wallet,
+  X,
+} from 'lucide-react'
 import { listRuns } from '../lib/api'
 import { pb } from '../lib/pb'
 import type { Attendance } from '../lib/types'
@@ -51,7 +58,8 @@ export default function PayoutScreen({
   const [includePayoutDay, setIncludePayoutDay] = useState(true)
   const [inputs, setInputs] = useState<Record<string, RowInputState>>({})
   const [selected, setSelected] = useState<Record<string, boolean>>({})
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [inspectingWorkerId, setInspectingWorkerId] = useState<string | null>(null)
+  const [notesOpen, setNotesOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const cutoff = includePayoutDay ? payoutDate : addDays(payoutDate, -1)
@@ -198,7 +206,6 @@ export default function PayoutScreen({
   useEffect(() => {
     if (includedRows.length === 0) return
     setSelected((prev) => {
-      // If already initialized, preserve
       if (Object.keys(prev).length > 0) return prev
       const initial: Record<string, boolean> = {}
       for (const r of includedRows) {
@@ -332,30 +339,23 @@ export default function PayoutScreen({
   }
 
   const allSelected = includedRows.length > 0 && includedRows.every((r) => selected[r.context.employee.id])
+  const inspectingRow = preview.find((r) => r.context.employee.id === inspectingWorkerId)
 
   return (
-    <div className="space-y-3 max-w-[1400px] mx-auto pb-16">
-      {/* Top Header & Fast Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-3 sm:px-4 rounded-xl border border-stone-200 shadow-xs">
-        <div>
-          <div className="text-base font-black text-stone-900 flex items-center gap-2">
-            <span>Issue Payout (પગાર ચૂકવણી)</span>
-            <Badge tone="green">{includedRows.length} Workers Active</Badge>
-          </div>
-          <div className="text-xs text-stone-500">
-            Verify earnings, deduct Chalu / Main upad, and pay out cash. All fields update live.
-          </div>
-        </div>
-
-        {/* Payout Date & Cutoff bar */}
-        <div className="flex flex-wrap items-center gap-3 text-xs bg-stone-50 px-3 py-1.5 rounded-lg border border-stone-200">
+    <div className="w-full space-y-2 pb-12 select-text">
+      {/* 1. Fast Control & Summary Header Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2 shadow-2xs">
+        {/* Left: Date & Cutoff controls */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-black text-stone-900 text-sm">Issue Payout (પગાર)</span>
+          <span className="text-stone-300">|</span>
           <label className="flex items-center gap-1.5 font-bold text-stone-700">
             <span>Date:</span>
             <input
               type="date"
               value={payoutDate}
               onChange={(e) => setPayoutDate(e.target.value)}
-              className="h-7 px-2 py-0.5 rounded border border-stone-300 font-medium text-xs bg-white"
+              className="h-7 rounded border border-stone-300 bg-stone-50 px-2 text-xs font-bold focus:border-emerald-600 focus:outline-none"
             />
           </label>
           <label className="flex items-center gap-1.5 font-bold text-stone-700 cursor-pointer select-none">
@@ -365,63 +365,120 @@ export default function PayoutScreen({
               onChange={(e) => setIncludePayoutDay(e.target.checked)}
               className="h-3.5 w-3.5 rounded accent-emerald-600"
             />
-            <span>Count today</span>
+            <span>Count today ({formatDateShort(cutoff)})</span>
           </label>
-          <span className="text-stone-400">|</span>
-          <span className="text-stone-600 font-medium">
-            Cutoff: <strong className="text-stone-900">{formatDateShort(cutoff)}</strong>
-          </span>
+        </div>
+
+        {/* Center: Hero Cash Needed Pill & Notes popover toggle */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1">
+            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
+              Cash to Hand Over (રોકડ):
+            </span>
+            <span className="text-base font-black text-emerald-950 tabular-nums">
+              {formatMoney(totals.cashToHand)}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setNotesOpen(!notesOpen)}
+            className={`flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition select-none ${
+              notesOpen
+                ? 'border-emerald-700 bg-emerald-700 text-white shadow-2xs'
+                : 'border-stone-300 bg-stone-50 text-stone-700 hover:bg-stone-100'
+            }`}
+            title="Click to toggle currency denomination checklist"
+          >
+            <Banknote className="h-3.5 w-3.5 text-emerald-600" />
+            <span>Notes</span>
+            <span className="text-[10px] opacity-75">
+              ({denoms.notes.filter((n) => n.count > 0).length} types)
+            </span>
+          </button>
+        </div>
+
+        {/* Right: Save Button */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={hasAnyErrors || cleanSelectedRows.length === 0}
+            onClick={() => setConfirmOpen(true)}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-4 shadow-xs"
+          >
+            <Wallet className="h-3.5 w-3.5 mr-1" />
+            <span>Save Payout ({cleanSelectedRows.length})</span>
+          </Button>
         </div>
       </div>
 
-      {/* Gentle Payout Reminder Banner */}
+      {/* Floating Notes Denominations Checklist Banner */}
+      {notesOpen && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-950 via-teal-950 to-stone-900 px-3.5 py-2 text-xs font-mono text-white shadow-md">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 mr-1">
+            Withdrawal Checklist:
+          </span>
+          {denoms.notes
+            .filter((n) => n.count > 0)
+            .map((n) => (
+              <span
+                key={n.note}
+                className="rounded bg-white/20 px-2 py-0.5 font-bold text-white tabular-nums border border-white/10"
+              >
+                {n.count} × ₹{n.note} = ₹{(n.count * n.note).toLocaleString('en-IN')}
+              </span>
+            ))}
+          {denoms.coins > 0 && (
+            <span className="rounded bg-white/20 px-2 py-0.5 font-bold text-emerald-200 tabular-nums border border-white/10">
+              Coins: ₹{denoms.coins}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => setNotesOpen(false)}
+            className="ml-auto text-stone-400 hover:text-white text-xs px-1 font-bold"
+          >
+            ✕ Close
+          </button>
+        </div>
+      )}
+
+      {/* Payout Reminder if overdue */}
       {daysSinceLastPayout !== null && daysSinceLastPayout >= 4 && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
-          <TriangleAlert className="h-4 w-4 text-amber-700 shrink-0" />
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900">
+          <TriangleAlert className="h-3.5 w-3.5 text-amber-700 shrink-0" />
           <span>
-            Last payout was <strong>{daysSinceLastPayout} days ago</strong> on {formatDateLong(latestRun!.payout_date)}. Weekly payouts are settled on Thursdays.
+            Last payout was <strong>{daysSinceLastPayout} days ago</strong> on {formatDateLong(latestRun!.payout_date)}.
           </span>
         </div>
       )}
 
-      {/* Hero Cash Needed Banner with Denomination Breakdown */}
-      {cleanSelectedRows.length > 0 && (
-        <div className="rounded-xl bg-gradient-to-r from-emerald-950 via-teal-900 to-stone-900 px-4 py-3 text-white shadow-sm flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div>
-            <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-300">
-              Total Cash to Hand Over (હાથમાં આપવાની કુલ રોકડ)
-            </div>
-            <div className="text-2xl font-black tracking-tight text-white tabular-nums">
-              {formatMoney(totals.cashToHand)}
-            </div>
-            <div className="text-[11px] text-emerald-200/80">
-              {cleanSelectedRows.length} workers ticked · Net Payable: {formatMoney(totals.payable)} · Upad Recovered: {formatMoney(totals.chaluRec + totals.motoRec)}
-            </div>
-          </div>
-
-          {/* Compact Note Count Checklist */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-lg border border-white/15 text-xs font-mono">
-            <span className="text-[10px] uppercase font-bold text-emerald-200 mr-1">Notes:</span>
-            {denoms.notes.filter((n) => n.count > 0).map((n) => (
-              <span key={n.note} className="rounded bg-white/20 px-2 py-0.5 font-bold text-white tabular-nums">
-                {n.count} × ₹{n.note}
-              </span>
-            ))}
-            {denoms.coins > 0 && (
-              <span className="rounded bg-white/20 px-2 py-0.5 font-bold text-emerald-200 tabular-nums">
-                Coins: {formatMoney(denoms.coins * 100)}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Main Dense Payout Table */}
+      {/* 2. Main High-Density Table */}
       <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-xs">
         <table className="w-full border-collapse text-xs">
           <thead>
-            <tr className="bg-stone-100/90 text-stone-700 font-bold border-b border-stone-200 select-none">
-              <th className="py-2 px-2.5 text-left whitespace-nowrap sticky left-0 bg-stone-100 z-10">
+            {/* Top Group Headers */}
+            <tr className="bg-stone-100 text-stone-600 font-bold text-[10px] uppercase tracking-wider border-b border-stone-200 select-none">
+              <th colSpan={2} className="py-1 px-2.5 text-left sticky left-0 bg-stone-100 z-20 border-r border-stone-200">
+                Worker & Prior
+              </th>
+              <th colSpan={2} className="py-1 px-2 text-center border-r border-stone-200">
+                Current Work
+              </th>
+              <th colSpan={2} className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900">
+                Chalu Loan (ચાલુ)
+              </th>
+              <th colSpan={2} className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900">
+                Moto Loan (મોટો)
+              </th>
+              <th colSpan={6} className="py-1 px-2.5 text-center bg-emerald-50/50 text-emerald-950">
+                Settlement & Cash Handover (ચૂકવણી)
+              </th>
+            </tr>
+
+            {/* Second Tier Column Headers */}
+            <tr className="bg-stone-50 text-stone-700 font-bold text-[11px] border-b border-stone-300 select-none">
+              <th className="py-1.5 px-2.5 text-left sticky left-0 bg-stone-50 z-20 border-r border-stone-200 whitespace-nowrap">
                 <label className="flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="checkbox"
@@ -432,44 +489,54 @@ export default function PayoutScreen({
                   <span>Worker ({includedRows.length})</span>
                 </label>
               </th>
-              <th className="py-2 px-2 text-right whitespace-nowrap">Carry</th>
-              <th className="py-2 px-2 text-right whitespace-nowrap">Earned</th>
-              <th className="py-2 px-2 text-right whitespace-nowrap">Adj</th>
-              <th className="py-2 px-2 text-right whitespace-nowrap text-stone-500">Chalu Bal</th>
-              <th className="py-2 px-2 text-right whitespace-nowrap text-stone-500">Main Bal</th>
-              <th className="py-2 px-2 text-center whitespace-nowrap bg-amber-50/70 border-x border-amber-200/60 text-amber-900">
-                Chalu Rec ₹
+              <th className="py-1.5 px-2 text-right border-r border-stone-200 whitespace-nowrap text-stone-600" title="Previous unpaid salary brought forward">
+                Carry
               </th>
-              <th className="py-2 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200/60 text-amber-900">
-                Main Rec ₹
+              <th className="py-1.5 px-2 text-right whitespace-nowrap text-stone-900" title="Earned this cycle (Days + OT)">
+                Earned
               </th>
-              <th className="py-2 px-2 text-center whitespace-nowrap bg-stone-50 text-stone-700">
-                New Upad ₹
+              <th className="py-1.5 px-2 text-right border-r border-stone-200 whitespace-nowrap text-stone-600" title="Bonus (+) or Fine (-)">
+                Adj
               </th>
-              <th className="py-2 px-2.5 text-right whitespace-nowrap font-black text-stone-900 bg-stone-50">
+              <th className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500" title="Current Chalu balance">
+                Chalu Bal
+              </th>
+              <th className="py-1.5 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200 text-amber-900" title="Chalu recovery to deduct">
+                Chalu Cut ₹
+              </th>
+              <th className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500" title="Current Moto balance">
+                Moto Bal
+              </th>
+              <th className="py-1.5 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200 text-amber-900" title="Moto recovery to deduct">
+                Moto Cut ₹
+              </th>
+              <th className="py-1.5 px-2.5 text-right whitespace-nowrap font-black text-stone-900 bg-stone-100 border-r border-stone-200" title="Net salary due after deducting loans">
                 Payable
               </th>
-              <th className="py-2 px-2 text-center whitespace-nowrap bg-sky-50/70 border-x border-sky-200/60 text-sky-900">
+              <th className="py-1.5 px-2 text-center whitespace-nowrap" title="Give new upad cash today">
+                New Upad ₹
+              </th>
+              <th className="py-1.5 px-2 text-center whitespace-nowrap bg-sky-50/70 border-x border-sky-200 text-sky-900" title="Salary actually paid out (blank = 100% full)">
                 Salary Paid ₹
               </th>
-              <th className="py-2 px-2.5 text-right whitespace-nowrap font-black text-emerald-800 bg-emerald-50/70">
+              <th className="py-1.5 px-2.5 text-right whitespace-nowrap font-black text-emerald-900 bg-emerald-100/70 border-r border-emerald-200" title="Physical cash to hand over: Salary Paid + New Upad">
                 Cash to Hand
               </th>
-              <th className="py-2 px-2 text-right whitespace-nowrap text-stone-600">Carry Out</th>
-              <th className="py-2 px-2.5 text-left whitespace-nowrap">Flags / Detail</th>
+              <th className="py-1.5 px-2 text-right whitespace-nowrap text-stone-600 border-r border-stone-200" title="Unpaid salary carried to next week">
+                Carry Out
+              </th>
+              <th className="py-1.5 px-2.5 text-left whitespace-nowrap">Status</th>
             </tr>
           </thead>
 
-          <tbody className="divide-y divide-stone-100">
+          <tbody className="divide-y divide-stone-100 font-medium">
             {includedRows.map((r) => {
               const emp = r.context.employee
               const c = r.computation
               const isTicked = !!selected[emp.id]
-              const isExp = !!expanded[emp.id]
               const inp = inputs[emp.id] || { cr: '', mr: '', ng: '', nb: 'chalu', sp: '' }
               const isInactive = !emp.active
 
-              // Settle full inactive worker shortcut
               const handleQuickSettle = () => {
                 if (!c) return
                 const crVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
@@ -488,303 +555,304 @@ export default function PayoutScreen({
               }
 
               return (
-                <>
-                  <tr
-                    key={emp.id}
-                    className={`hover:bg-stone-50/80 transition-colors ${!isTicked ? 'opacity-40 bg-stone-50/30' : ''}`}
+                <tr
+                  key={emp.id}
+                  className={`hover:bg-stone-50/80 transition-colors ${!isTicked ? 'opacity-40 bg-stone-50/30' : ''}`}
+                >
+                  {/* 1. Worker (Sticky Left) */}
+                  <td className="py-1 px-2.5 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-stone-100">
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={isTicked}
+                        onChange={(e) => setSelected((prev) => ({ ...prev, [emp.id]: e.target.checked }))}
+                        className="h-3.5 w-3.5 rounded accent-emerald-600 cursor-pointer"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setInspectingWorkerId(emp.id)}
+                        className="flex items-center gap-1 text-left group hover:text-emerald-700"
+                        title="Click to view full attendance & upad ledger breakdown"
+                      >
+                        <span className="font-black text-stone-900 group-hover:text-emerald-700 truncate max-w-[130px]">
+                          {emp.name}
+                        </span>
+                        <span className="text-[10px] text-stone-400">#{emp.employee_no}</span>
+                        {isInactive && (
+                          <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 rounded">
+                            Inactive
+                          </span>
+                        )}
+                        <Info className="h-3 w-3 text-stone-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </button>
+                    </div>
+                  </td>
+
+                  {/* 2. Carry In */}
+                  <td className="py-1 px-2 text-right tabular-nums text-stone-700 border-r border-stone-100">
+                    {c ? formatMoney(c.carry_paise) : '—'}
+                  </td>
+
+                  {/* 3. Earned (Days + OT) */}
+                  <td
+                    className="py-1 px-2 text-right tabular-nums font-bold text-stone-900 cursor-pointer hover:bg-stone-100/50"
+                    onClick={() => setInspectingWorkerId(emp.id)}
+                    title={
+                      c
+                        ? `${c.day_breakdown.length} days recorded. Click to inspect days & OT.`
+                        : ''
+                    }
                   >
-                    {/* 1. Worker */}
-                    <td className="py-1.5 px-2.5 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-stone-100">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={isTicked}
-                          onChange={(e) => setSelected((prev) => ({ ...prev, [emp.id]: e.target.checked }))}
-                          className="h-3.5 w-3.5 rounded accent-emerald-600 cursor-pointer"
-                        />
+                    <span>{c ? formatMoney(c.earned_paise) : '—'}</span>
+                    {c && c.ot_paise > 0 && (
+                      <span className="ml-1 text-[10px] text-teal-700 font-semibold" title={`${formatMoney(c.ot_paise)} OT`}>
+                        *
+                      </span>
+                    )}
+                  </td>
+
+                  {/* 4. Adj (Bonus/Fine) */}
+                  <td className="py-1 px-2 text-right tabular-nums text-stone-700 border-r border-stone-100">
+                    {c && c.adjustments_paise !== 0 ? (
+                      <span
+                        className={
+                          c.adjustments_paise > 0
+                            ? 'text-emerald-700 font-bold'
+                            : 'text-rose-700 font-bold'
+                        }
+                      >
+                        {c.adjustments_paise > 0 ? '+' : ''}
+                        {formatMoney(c.adjustments_paise)}
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+
+                  {/* 5. Chalu Bal */}
+                  <td
+                    className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-amber-800"
+                    title="Click balance to fill Chalu Cut"
+                    onClick={() => {
+                      if (!c || c.chalu_balance_paise === 0) return
+                      const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
+                      setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                    }}
+                  >
+                    {c && c.chalu_balance_paise > 0 ? formatMoney(c.chalu_balance_paise) : '0'}
+                  </td>
+
+                  {/* 6. Chalu Cut ₹ */}
+                  <td className="py-0.5 px-1 text-center bg-amber-50/40 border-r border-amber-200/50">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={inp.cr}
+                        onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
+                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
+                      />
+                      {c && c.chalu_balance_paise > 0 && (
                         <button
                           type="button"
-                          onClick={() => setExpanded((prev) => ({ ...prev, [emp.id]: !prev[emp.id] }))}
-                          className="flex items-center gap-1.5 text-left group"
-                          title="Click to view days & overtime breakdown"
+                          onClick={() => {
+                            const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
+                            setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                          }}
+                          className="text-[9px] font-bold text-amber-800 hover:bg-amber-100 px-1 py-0.5 rounded"
+                          title="Fill maximum recoverable"
                         >
-                          <Avatar name={emp.name} size="sm" />
-                          <div className="min-w-0">
-                            <div className="font-extrabold text-stone-900 group-hover:text-emerald-700 truncate">
-                              {emp.name}
-                            </div>
-                            <div className="text-[10px] text-stone-400">
-                              #{emp.employee_no}
-                              {isInactive && <span className="ml-1 text-amber-700 font-bold">Inactive</span>}
-                            </div>
-                          </div>
-                          {isExp ? (
-                            <ChevronDown className="h-3 w-3 text-stone-400" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3 text-stone-300 group-hover:text-stone-500" />
-                          )}
+                          Max
                         </button>
-                      </div>
-                    </td>
-
-                    {/* 2. Carry */}
-                    <td className="py-1.5 px-2 text-right tabular-nums text-stone-700">
-                      {c ? formatMoney(c.carry_paise) : '—'}
-                    </td>
-
-                    {/* 3. Earned */}
-                    <td className="py-1.5 px-2 text-right tabular-nums font-semibold text-stone-900">
-                      {c ? formatMoney(c.earned_paise) : '—'}
-                      {c && c.ot_paise > 0 && (
-                        <div className="text-[10px] text-teal-700 font-bold leading-none">
-                          +{formatMoney(c.ot_paise)} OT
-                        </div>
                       )}
-                    </td>
+                    </div>
+                  </td>
 
-                    {/* 4. Adj */}
-                    <td className="py-1.5 px-2 text-right tabular-nums text-stone-700">
-                      {c && c.adjustments_paise !== 0 ? (
-                        <span className={c.adjustments_paise > 0 ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
-                          {c.adjustments_paise > 0 ? '+' : ''}{formatMoney(c.adjustments_paise)}
-                        </span>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
+                  {/* 7. Moto Bal */}
+                  <td
+                    className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-amber-800"
+                    title="Click balance to fill Moto Cut"
+                    onClick={() => {
+                      if (!c || c.moto_balance_paise === 0) return
+                      const crVal = parseMoneyInput(inp.cr)
+                      const maxVal = Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal))
+                      setRowField(emp.id, 'mr', (maxVal / 100).toString())
+                    }}
+                  >
+                    {c && c.moto_balance_paise > 0 ? formatMoney(c.moto_balance_paise) : '0'}
+                  </td>
 
-                    {/* 5. Chalu Bal */}
-                    <td className="py-1.5 px-2 text-right tabular-nums text-stone-600">
-                      {c && c.chalu_balance_paise > 0 ? formatMoney(c.chalu_balance_paise) : '0'}
-                    </td>
-
-                    {/* 6. Main Bal */}
-                    <td className="py-1.5 px-2 text-right tabular-nums text-stone-600">
-                      {c && c.moto_balance_paise > 0 ? formatMoney(c.moto_balance_paise) : '0'}
-                    </td>
-
-                    {/* 7. Chalu Recovery ₹ */}
-                    <td className="py-1 px-1.5 text-center bg-amber-50/40 border-x border-amber-200/50">
-                      <div className="flex items-center justify-center gap-1">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          value={inp.cr}
-                          onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
-                          className="h-7 w-18 px-1.5 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-                        {c && c.chalu_balance_paise > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                              setRowField(emp.id, 'cr', (maxVal / 100).toString())
-                            }}
-                            className="text-[10px] font-bold text-amber-800 hover:underline"
-                            title="Fill maximum recoverable from Chalu"
-                          >
-                            Max
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 8. Main Recovery ₹ */}
-                    <td className="py-1 px-1.5 text-center bg-amber-50/40 border-r border-amber-200/50">
-                      <div className="flex items-center justify-center gap-1">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          value={inp.mr}
-                          onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
-                          className="h-7 w-18 px-1.5 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-                        {c && c.moto_balance_paise > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const crVal = parseMoneyInput(inp.cr)
-                              const maxVal = Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal))
-                              setRowField(emp.id, 'mr', (maxVal / 100).toString())
-                            }}
-                            className="text-[10px] font-bold text-amber-800 hover:underline"
-                            title="Fill maximum recoverable from Main"
-                          >
-                            Max
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 9. New Upad Given ₹ */}
-                    <td className="py-1 px-1.5 text-center bg-stone-50/60">
-                      <div className="flex items-center justify-center gap-1">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          value={inp.ng}
-                          onChange={(e) => setRowField(emp.id, 'ng', e.target.value)}
-                          className="h-7 w-16 px-1.5 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:outline-none"
-                        />
-                        <select
-                          value={inp.nb}
-                          onChange={(e) => setRowField(emp.id, 'nb', e.target.value as 'chalu' | 'moto')}
-                          className="h-7 px-1 text-[10px] font-semibold rounded border border-stone-300 bg-white"
-                        >
-                          <option value="chalu">Chalu</option>
-                          <option value="moto">Main</option>
-                        </select>
-                      </div>
-                    </td>
-
-                    {/* 10. Net Payable */}
-                    <td className="py-1.5 px-2.5 text-right tabular-nums font-black text-sm text-stone-900 bg-stone-50/80">
-                      {c ? formatMoney(c.payable_paise) : '—'}
-                    </td>
-
-                    {/* 11. Salary Paid ₹ (blank = full) */}
-                    <td className="py-1 px-1.5 text-center bg-sky-50/40 border-x border-sky-200/50">
-                      <div className="flex items-center justify-center gap-1">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder={c ? paiseToInput(c.payable_paise) : '0'}
-                          value={inp.sp}
-                          onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
-                          className="h-7 w-20 px-1.5 text-right font-bold text-xs rounded border border-sky-300 bg-white tabular-nums focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                          title="Leave blank to pay full payable amount"
-                        />
-                        {inp.sp !== '' && (
-                          <button
-                            type="button"
-                            onClick={() => setRowField(emp.id, 'sp', '')}
-                            className="text-[10px] font-bold text-sky-800 hover:underline"
-                            title="Reset to full payout"
-                          >
-                            Full
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 12. Cash to Hand Over */}
-                    <td className="py-1.5 px-2.5 text-right tabular-nums font-black text-sm text-emerald-800 bg-emerald-50/50">
-                      {c ? formatMoney(r.cashToHandOverPaise) : '—'}
-                    </td>
-
-                    {/* 13. Closing Carry */}
-                    <td className="py-1.5 px-2 text-right tabular-nums text-stone-600">
-                      {c && r.closingCarryPaise > 0 ? (
-                        <span className="font-bold text-amber-800" title="Unpaid salary carried forward to next week">
-                          {formatMoney(r.closingCarryPaise)}
-                        </span>
-                      ) : (
-                        '0'
-                      )}
-                    </td>
-
-                    {/* 14. Flags / Detail */}
-                    <td className="py-1.5 px-2.5 text-left text-xs whitespace-nowrap">
-                      {r.errors.length > 0 ? (
-                        <span className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                          {r.errors.map((err) => formatEngineError(err)).join(', ')}
-                        </span>
-                      ) : isInactive && c && (c.chalu_balance_paise > 0 || c.moto_balance_paise > 0) ? (
+                  {/* 8. Moto Cut ₹ */}
+                  <td className="py-0.5 px-1 text-center bg-amber-50/40 border-r border-amber-200/50">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={inp.mr}
+                        onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
+                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
+                      />
+                      {c && c.moto_balance_paise > 0 && (
                         <button
                           type="button"
-                          onClick={handleQuickSettle}
-                          className="rounded bg-amber-100 hover:bg-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-900 border border-amber-300 transition"
-                          title="Offset upad against carry and pay balance"
+                          onClick={() => {
+                            const crVal = parseMoneyInput(inp.cr)
+                            const maxVal = Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal))
+                            setRowField(emp.id, 'mr', (maxVal / 100).toString())
+                          }}
+                          className="text-[9px] font-bold text-amber-800 hover:bg-amber-100 px-1 py-0.5 rounded"
+                          title="Fill maximum recoverable"
                         >
-                          Settle Inactive
+                          Max
                         </button>
-                      ) : r.unmarkedDates.length > 0 ? (
-                        <span className="text-amber-800 font-semibold bg-amber-50 px-1.5 py-0.5 rounded text-[10px]" title="Unmarked days in cycle">
-                          {r.unmarkedDates.length}d unmarked
-                        </span>
-                      ) : (
-                        <span className="text-emerald-700 text-[11px] font-semibold">Ready ✓</span>
                       )}
-                    </td>
-                  </tr>
+                    </div>
+                  </td>
 
-                  {/* Expanded Sub-Row showing day-by-day marks */}
-                  {isExp && c && (
-                    <tr className="bg-stone-50/90 border-b border-stone-200">
-                      <td colSpan={14} className="py-2.5 px-4 text-xs">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div>
-                            <div className="font-bold text-stone-800 mb-1">
-                              Daily Attendance Breakdown ({formatDateShort(c.from_date)} → {formatDateShort(c.cutoff)})
-                            </div>
-                            <div className="flex flex-wrap gap-1.5">
-                              {c.day_breakdown.map((d) => (
-                                <span
-                                  key={d.date}
-                                  className="rounded border border-stone-200 bg-white px-2 py-1 text-[11px] text-stone-700 tabular-nums shadow-2xs"
-                                  title={`${formatDateLong(d.date)} · Base: ${formatMoney(d.base_paise)}, OT: ${formatMoney(d.ot_paise)}`}
-                                >
-                                  <strong>{formatDateShort(d.date).slice(0, 6)}</strong> {STATUS_LETTER[d.status] ?? d.status}
-                                  {d.ot_paise > 0 && <span className="font-bold text-emerald-700"> +{formatMoney(d.ot_paise)}</span>}
-                                  {d.is_late_entry && <span className="text-amber-700 font-bold" title="Late entry">*</span>}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="text-right text-[11px] text-stone-500 font-medium shrink-0">
-                            Rate: <strong className="text-stone-800">{formatMoney(c.day_breakdown[0]?.rate_paise ?? 0)}/d</strong> · OT Divisor: 8h
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
+                  {/* 9. Net Payable */}
+                  <td className="py-1 px-2.5 text-right tabular-nums font-black text-xs text-stone-900 bg-stone-100 border-r border-stone-200">
+                    {c ? formatMoney(c.payable_paise) : '—'}
+                  </td>
+
+                  {/* 10. New Upad Given ₹ */}
+                  <td className="py-0.5 px-1 text-center">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={inp.ng}
+                        onChange={(e) => setRowField(emp.id, 'ng', e.target.value)}
+                        className="h-6.5 w-15 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setRowField(emp.id, 'nb', inp.nb === 'moto' ? 'chalu' : 'moto')}
+                        className={`text-[9px] font-extrabold px-1 py-0.5 rounded border ${
+                          inp.nb === 'moto'
+                            ? 'bg-purple-50 text-purple-800 border-purple-200'
+                            : 'bg-stone-50 text-stone-700 border-stone-200'
+                        }`}
+                        title={`New upad added to ${inp.nb === 'moto' ? 'Moto' : 'Chalu'}. Click to toggle.`}
+                      >
+                        {inp.nb === 'moto' ? 'M' : 'C'}
+                      </button>
+                    </div>
+                  </td>
+
+                  {/* 11. Salary Paid ₹ */}
+                  <td className="py-0.5 px-1 text-center bg-sky-50/40 border-x border-sky-200/50">
+                    <div className="flex items-center justify-center gap-0.5">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={c ? paiseToInput(c.payable_paise) : '0'}
+                        value={inp.sp}
+                        onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
+                        className="h-6.5 w-18 px-1 text-right font-bold text-xs rounded border border-sky-300 bg-white tabular-nums focus:border-sky-500 focus:outline-none"
+                        title="Leave blank to pay full payable amount"
+                      />
+                      {inp.sp !== '' && (
+                        <button
+                          type="button"
+                          onClick={() => setRowField(emp.id, 'sp', '')}
+                          className="text-[9px] font-bold text-sky-800 hover:bg-sky-100 px-1 py-0.5 rounded"
+                          title="Reset to 100% full payout"
+                        >
+                          Full
+                        </button>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* 12. Cash to Hand Over (High Impact) */}
+                  <td className="py-1 px-2.5 text-right tabular-nums font-black text-sm text-emerald-900 bg-emerald-100/70 border-r border-emerald-200">
+                    {c ? formatMoney(r.cashToHandOverPaise) : '—'}
+                  </td>
+
+                  {/* 13. Closing Carry */}
+                  <td className="py-1 px-2 text-right tabular-nums text-stone-600 border-r border-stone-100">
+                    {c && r.closingCarryPaise > 0 ? (
+                      <span className="font-bold text-amber-800" title="Unpaid salary carried to next week">
+                        {formatMoney(r.closingCarryPaise)}
+                      </span>
+                    ) : (
+                      '0'
+                    )}
+                  </td>
+
+                  {/* 14. Status / Detail */}
+                  <td className="py-1 px-2 text-left whitespace-nowrap text-xs">
+                    {r.errors.length > 0 ? (
+                      <span className="text-rose-700 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 text-[10px]">
+                        {r.errors.map((err) => formatEngineError(err)).join('; ')}
+                      </span>
+                    ) : isInactive && c && (c.chalu_balance_paise > 0 || c.moto_balance_paise > 0) ? (
+                      <button
+                        type="button"
+                        onClick={handleQuickSettle}
+                        className="rounded bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-900 border border-amber-300 transition"
+                        title="Offset balance against carry and pay net"
+                      >
+                        Settle Inactive
+                      </button>
+                    ) : r.unmarkedDates.length > 0 ? (
+                      <span
+                        className="text-amber-800 font-semibold bg-amber-50 px-1.5 py-0.5 rounded text-[10px]"
+                        title="Unmarked dates"
+                      >
+                        {r.unmarkedDates.length}d unmarked
+                      </span>
+                    ) : (
+                      <span className="text-emerald-700 text-[11px] font-bold">✓ Ready</span>
+                    )}
+                  </td>
+                </tr>
               )
             })}
           </tbody>
 
-          {/* Dense Sticky Summary Totals Footer */}
+          {/* Sticky Dense Totals Footer */}
           <tfoot>
-            <tr className="bg-stone-100 font-black text-stone-900 border-t-2 border-stone-300 tabular-nums">
-              <td className="py-2 px-2.5 text-left sticky left-0 bg-stone-100 z-10 border-r border-stone-200">
+            <tr className="bg-stone-100 font-black text-stone-900 border-t-2 border-stone-300 tabular-nums text-xs">
+              <td className="py-1.5 px-2.5 text-left sticky left-0 bg-stone-100 z-10 border-r border-stone-200 whitespace-nowrap">
                 Total ({cleanSelectedRows.length} ticked)
               </td>
-              <td className="py-2 px-2 text-right">{formatMoney(totals.carry)}</td>
-              <td className="py-2 px-2 text-right">{formatMoney(totals.earned)}</td>
-              <td className="py-2 px-2 text-right">
+              <td className="py-1.5 px-2 text-right border-r border-stone-200">{formatMoney(totals.carry)}</td>
+              <td className="py-1.5 px-2 text-right">{formatMoney(totals.earned)}</td>
+              <td className="py-1.5 px-2 text-right border-r border-stone-200">
                 {totals.adj !== 0 ? (totals.adj > 0 ? `+${formatMoney(totals.adj)}` : formatMoney(totals.adj)) : '—'}
               </td>
-              <td className="py-2 px-2 text-right text-stone-600">{formatMoney(totals.chaluBal)}</td>
-              <td className="py-2 px-2 text-right text-stone-600">{formatMoney(totals.motoBal)}</td>
-              <td className="py-2 px-2 text-center bg-amber-100/60 border-x border-amber-200 text-amber-950 font-bold">
+              <td className="py-1.5 px-2 text-right text-stone-500">{formatMoney(totals.chaluBal)}</td>
+              <td className="py-1.5 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
                 -{formatMoney(totals.chaluRec)}
               </td>
-              <td className="py-2 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
+              <td className="py-1.5 px-2 text-right text-stone-500">{formatMoney(totals.motoBal)}</td>
+              <td className="py-1.5 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
                 -{formatMoney(totals.motoRec)}
               </td>
-              <td className="py-2 px-2 text-center text-stone-800">
-                {totals.newUpad > 0 ? `+${formatMoney(totals.newUpad)}` : '—'}
-              </td>
-              <td className="py-2 px-2.5 text-right font-black text-sm text-stone-950 bg-stone-200/60">
+              <td className="py-1.5 px-2.5 text-right font-black text-stone-950 bg-stone-200/70 border-r border-stone-200">
                 {formatMoney(totals.payable)}
               </td>
-              <td className="py-2 px-2 text-center bg-sky-100/60 border-x border-sky-200 text-sky-950 font-bold">
+              <td className="py-1.5 px-2 text-center text-stone-800">
+                {totals.newUpad > 0 ? `+${formatMoney(totals.newUpad)}` : '—'}
+              </td>
+              <td className="py-1.5 px-2 text-center bg-sky-100/60 border-x border-sky-200 text-sky-950 font-bold">
                 {formatMoney(totals.salaryPaid)}
               </td>
-              <td className="py-2 px-2.5 text-right font-black text-base text-emerald-900 bg-emerald-100">
+              <td className="py-1.5 px-2.5 text-right font-black text-sm text-emerald-950 bg-emerald-100 border-r border-emerald-200">
                 {formatMoney(totals.cashToHand)}
               </td>
-              <td className="py-2 px-2 text-right text-stone-700">
+              <td className="py-1.5 px-2 text-right text-stone-700 border-r border-stone-200">
                 {formatMoney(totals.closingCarry)}
               </td>
-              <td className="py-2 px-2.5 text-left">
+              <td className="py-1.5 px-2 text-left">
                 {hasAnyErrors ? (
-                  <span className="text-rose-700 font-bold text-xs">Blocked</span>
+                  <span className="text-rose-700 font-bold text-xs">Errors present</span>
                 ) : (
-                  <span className="text-emerald-800 font-bold text-xs">All OK</span>
+                  <span className="text-emerald-800 font-bold text-xs">All Clear</span>
                 )}
               </td>
             </tr>
@@ -792,29 +860,15 @@ export default function PayoutScreen({
         </table>
       </div>
 
-      {/* Save Action Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-xl border border-stone-200 shadow-xs">
-        <div className="text-xs text-stone-600">
-          Ready to finalize? Ticked workers will have statements issued and attendance marked settled.
-          {hasAnyErrors && (
-            <div className="text-rose-700 font-bold mt-0.5">
-              Fix the red messages on ticked workers to enable saving.
-            </div>
-          )}
-        </div>
+      {/* 3. Slide-Over Worker Inspector Drawer */}
+      {inspectingRow && inspectingRow.computation && (
+        <WorkerInspectorDrawer
+          row={inspectingRow}
+          onClose={() => setInspectingWorkerId(null)}
+        />
+      )}
 
-        <Button
-          size="lg"
-          disabled={hasAnyErrors || cleanSelectedRows.length === 0}
-          onClick={() => setConfirmOpen(true)}
-          className="bg-emerald-700 hover:bg-emerald-800 text-white font-black shadow-md shrink-0 px-6"
-        >
-          <Wallet className="h-4 w-4 mr-1.5" />
-          <span>Save Payout for Ticked Workers ({cleanSelectedRows.length})</span>
-        </Button>
-      </div>
-
-      {/* Confirmation Modal */}
+      {/* 4. Confirmation Modal */}
       {confirmOpen && (
         <ConfirmModal
           payoutDate={payoutDate}
@@ -828,6 +882,119 @@ export default function PayoutScreen({
           onConfirm={() => saveMutation.mutate()}
         />
       )}
+    </div>
+  )
+}
+
+function WorkerInspectorDrawer({
+  row,
+  onClose,
+}: {
+  row: {
+    context: WorkerContext
+    computation: any
+    errors: EngineError[]
+    warnings: EngineWarning[]
+    unmarkedDates: string[]
+  }
+  onClose: () => void
+}) {
+  const emp = row.context.employee
+  const c = row.computation
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-white h-full shadow-2xl p-5 overflow-y-auto flex flex-col justify-between"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+            <div>
+              <div className="text-lg font-black text-stone-900">{emp.name}</div>
+              <div className="text-xs text-stone-500 font-medium">
+                Worker #{emp.employee_no} · Rate: {formatMoney(row.context.rates[0]?.daily_rate_paise ?? 0)}/day
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Daily Attendance Grid */}
+          <div>
+            <div className="text-xs font-black uppercase tracking-wider text-stone-600 mb-2">
+              Attendance Records ({formatDateShort(c.from_date)} → {formatDateShort(c.cutoff)})
+            </div>
+            <div className="space-y-1.5">
+              {c.day_breakdown.map((d: any) => (
+                <div
+                  key={d.date}
+                  className="flex items-center justify-between rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs tabular-nums"
+                >
+                  <div>
+                    <strong className="text-stone-900">{formatDateLong(d.date)}</strong>
+                    <span className="ml-2 rounded bg-white px-1.5 py-0.5 font-bold text-stone-700 border border-stone-200">
+                      {STATUS_LETTER[d.status] ?? d.status}
+                    </span>
+                    {d.is_late_entry && (
+                      <span className="ml-1 text-[10px] font-bold text-amber-800 bg-amber-100 px-1 rounded">
+                        Late
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <span className="font-semibold text-stone-800">{formatMoney(d.base_paise)}</span>
+                    {d.ot_paise > 0 && (
+                      <span className="ml-1 font-bold text-emerald-700">+{formatMoney(d.ot_paise)} OT</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Loan & Balances Summary */}
+          <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 space-y-2 text-xs">
+            <div className="font-bold text-stone-900 uppercase text-[10px] tracking-wider">
+              Upad & Loan Balances
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Opening Carry (બાકી):</span>
+              <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.carry_paise)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Chalu Upad Balance:</span>
+              <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.chalu_balance_paise)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-stone-600">Moto Upad Balance:</span>
+              <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.moto_balance_paise)}</span>
+            </div>
+            <div className="border-t border-stone-200 pt-1.5 flex justify-between font-bold">
+              <span className="text-stone-800">Gross Available:</span>
+              <span className="font-black tabular-nums text-emerald-800">{formatMoney(c.total_due_paise)}</span>
+            </div>
+          </div>
+
+          {/* Warnings */}
+          {row.unmarkedDates.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900 font-medium">
+              ⚠️ {row.unmarkedDates.length} days unmarked in this cycle: {row.unmarkedDates.map((d) => formatDateShort(d)).join(', ')}.
+            </div>
+          )}
+        </div>
+
+        <Button variant="secondary" onClick={onClose} className="w-full mt-4">
+          Close Inspector
+        </Button>
+      </div>
     </div>
   )
 }
@@ -882,11 +1049,16 @@ function ConfirmModal({
             Withdrawal Notes Checklist (નોટો)
           </div>
           <div className="mt-1.5 flex flex-wrap gap-2">
-            {denoms.notes.filter((n) => n.count > 0).map((n) => (
-              <span key={n.note} className="rounded bg-white px-2 py-0.5 font-mono font-bold text-emerald-950 border border-emerald-200">
-                {n.count} × ₹{n.note}
-              </span>
-            ))}
+            {denoms.notes
+              .filter((n) => n.count > 0)
+              .map((n) => (
+                <span
+                  key={n.note}
+                  className="rounded bg-white px-2 py-0.5 font-mono font-bold text-emerald-950 border border-emerald-200"
+                >
+                  {n.count} × ₹{n.note}
+                </span>
+              ))}
           </div>
         </div>
 
@@ -894,7 +1066,11 @@ function ConfirmModal({
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button loading={loading} onClick={onConfirm} className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold">
+          <Button
+            loading={loading}
+            onClick={onConfirm}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold"
+          >
             Confirm & Issue ({workersCount})
           </Button>
         </div>
