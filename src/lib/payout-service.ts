@@ -125,7 +125,7 @@ export async function loadWorkerContexts(): Promise<WorkerContext[]> {
     const attendance: AttendanceRow[] = rawAtt.map((a) => ({
       id: a.id,
       employee: a.employee,
-      date: a.date,
+      date: normDate(a.date),
       status: a.status as DayStatus,
       ot_minutes: a.ot_minutes ?? 0,
       settled: !!a.settled_payout,
@@ -145,7 +145,7 @@ export async function loadWorkerContexts(): Promise<WorkerContext[]> {
       .map((u) => ({
         id: u.id,
         employee: u.employee,
-        date: u.date,
+        date: normDate(u.date),
         bucket: bucketOf(u),
         kind: u.kind,
         amount_paise: u.amount_paise,
@@ -178,7 +178,7 @@ export function buildPreview(
   const allEngineAtt: AttendanceRow[] = allRawAttendance.map((a) => ({
     id: a.id,
     employee: a.employee,
-    date: a.date,
+    date: normDate(a.date),
     status: a.status as DayStatus,
     ot_minutes: a.ot_minutes ?? 0,
     settled: !!a.settled_payout,
@@ -298,11 +298,15 @@ export async function savePayout(input: SavePayoutInput): Promise<{ runId: strin
       })
       statementIds.push(stmt.id)
 
+      const formattedPayoutDate = input.payoutDate.includes(' ')
+        ? input.payoutDate
+        : `${input.payoutDate.slice(0, 10)} 00:00:00.000Z`
+
       if (res.salary_paid_paise > 0) {
         const pay = await pb.collection(COLLECTIONS.payments).create({
           employee: row.context.employee.id,
           statement: stmt.id,
-          paid_on: input.payoutDate,
+          paid_on: formattedPayoutDate,
           amount_paise: res.salary_paid_paise,
           note: '',
           voided: false,
@@ -311,9 +315,10 @@ export async function savePayout(input: SavePayoutInput): Promise<{ runId: strin
       }
       if (res.chalu_recovery_paise > 0) upadIds.push((await pb.collection(COLLECTIONS.upad).create({
         employee: row.context.employee.id,
-        date: input.payoutDate,
+        date: formattedPayoutDate,
         kind: 'recovery',
         category: 'chalu',
+        bucket: 'chalu',
         amount_paise: res.chalu_recovery_paise,
         note: '',
         payout: runId,
@@ -321,9 +326,10 @@ export async function savePayout(input: SavePayoutInput): Promise<{ runId: strin
       })).id)
       if (res.moto_recovery_paise > 0) upadIds.push((await pb.collection(COLLECTIONS.upad).create({
         employee: row.context.employee.id,
-        date: input.payoutDate,
+        date: formattedPayoutDate,
         kind: 'recovery',
         category: 'moto',
+        bucket: 'moto',
         amount_paise: res.moto_recovery_paise,
         note: '',
         payout: runId,
@@ -331,9 +337,10 @@ export async function savePayout(input: SavePayoutInput): Promise<{ runId: strin
       })).id)
       if (res.new_upad_given_paise > 0) upadIds.push((await pb.collection(COLLECTIONS.upad).create({
         employee: row.context.employee.id,
-        date: input.payoutDate,
+        date: formattedPayoutDate,
         kind: 'given',
         category: res.new_upad_bucket,
+        bucket: res.new_upad_bucket,
         amount_paise: res.new_upad_given_paise,
         note: '',
         payout: runId,

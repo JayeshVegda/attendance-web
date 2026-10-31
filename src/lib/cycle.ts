@@ -19,7 +19,7 @@ export function otDivisor(settings: SettingsMap): number {
 
 export function lastClosedRun(runs: PayoutRun[]): PayoutRun | undefined {
   return [...runs]
-    .filter((run) => run.status === 'closed')
+    .filter((run) => run.status === 'closed' && !run.voided)
     .sort((a, b) => dateKey(b.payout_date).localeCompare(dateKey(a.payout_date)))[0]
 }
 

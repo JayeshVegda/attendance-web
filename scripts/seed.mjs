@@ -1,4 +1,17 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import PocketBase from 'pocketbase'
+
+const root = resolve(import.meta.dirname, '..')
+const envPath = join(root, '.env.local')
+
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/)
+    if (!match || match[1].startsWith('#')) continue
+    process.env[match[1]] ??= match[2].replace(/^['"]|['"]$/g, '')
+  }
+}
 
 const url = process.env.PB_URL || 'http://127.0.0.1:8090'
 const email = process.env.PB_ADMIN_EMAIL

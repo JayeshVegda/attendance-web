@@ -431,79 +431,83 @@ const cycleTwoDates = workDates('2026-10-09', '2026-10-15')
   await saveDays('bharat', days)
 }
 
-const openDates = workDates('2026-10-16', '2026-10-24')
+const cycleThreeDates = workDates('2026-10-16', '2026-10-26')
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   setStatus(days, '2026-10-20', 'absent', 0, 'Personal leave')
   addFriday(days, '2026-10-23', 60)
   await saveDays('ramesh', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   setStatus(days, '2026-10-24', 'half', 0, 'Half day')
   await saveDays('suresh', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   setStatus(days, '2026-10-21', 'full', 90, 'Overtime')
   await saveDays('mahesh', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   for (const date of ['2026-10-18', '2026-10-19', '2026-10-20', '2026-10-24']) {
     setStatus(days, date, 'absent', 0, 'Absent')
   }
   await saveDays('kiran', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   addFriday(days, '2026-10-23', 0)
   await saveDays('vijay', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   await saveDays('prakash', days, '2026-10-18')
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   addFriday(days, '2026-10-23', 0)
-  await saveDays('rekhaben', days, '2026-10-24', '2026-10-20')
+  await saveDays('rekhaben', days, '2026-10-26', '2026-10-20')
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   addFriday(days, '2026-10-23', 0)
   await saveDays('alpesh', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   setStatus(days, '2026-10-19', 'full', 120, 'Overtime')
   setStatus(days, '2026-10-24', 'full', 90, 'Overtime')
   addFriday(days, '2026-10-23', 0)
   await saveDays('dinesh', days)
 }
 {
-  const days = fullDays(openDates)
+  const days = fullDays(cycleThreeDates)
   addFriday(days, '2026-10-23', 0)
   await saveDays('bharat', days)
 }
 
 const adjustments = [
-  ['kiran', '2026-10-08', -50000, 'Damage deduction'],
-  ['bharat', '2026-10-07', 100000, 'Festival bonus'],
-  ['dinesh', '2026-10-08', 30000, 'Travel reimbursement'],
-  ['ramesh', '2026-10-13', 100000, 'Festival bonus'],
-  ['mahesh', '2026-10-13', 50000, 'Festival bonus'],
-  ['kiran', '2026-10-14', -20000, 'Late deduction'],
-  ['ramesh', '2026-10-20', 100000, 'Diwali bonus'],
-  ['dinesh', '2026-10-21', -30000, 'Tool damage'],
-  ['mahesh', '2026-10-22', 50000, 'Travel reimbursement'],
+  ['kiran', '2026-10-08', -50000, 'Damage deduction', 'deduction'],
+  ['bharat', '2026-10-07', 100000, 'Festival bonus', 'bonus'],
+  ['dinesh', '2026-10-08', 30000, 'Travel reimbursement', 'reimbursement'],
+  ['ramesh', '2026-10-13', 100000, 'Festival bonus', 'bonus'],
+  ['mahesh', '2026-10-13', 50000, 'Festival bonus', 'bonus'],
+  ['kiran', '2026-10-14', -20000, 'Late deduction', 'deduction'],
+  ['ramesh', '2026-10-20', 100000, 'Diwali bonus', 'bonus'],
+  ['dinesh', '2026-10-21', -30000, 'Tool damage', 'deduction'],
+  ['mahesh', '2026-10-22', 50000, 'Travel reimbursement', 'reimbursement'],
+  ['dinesh', '2026-10-28', 30000, 'Machinery repair incentive', 'bonus'],
+  ['kiran', '2026-10-28', -20000, 'Late arrival deduction', 'deduction'],
+  ['ramesh', '2026-10-29', 50000, 'Diwali advance bonus', 'bonus'],
 ]
 
-for (const [key, date, amount, note] of adjustments) {
+for (const [key, date, amount, note, kind] of adjustments) {
   await pb.collection('adjustments').create({
     employee: people.get(key).id,
     date: iso(date),
     amount_paise: amount,
+    kind: kind || (amount < 0 ? 'deduction' : 'bonus'),
     note,
   })
 }
@@ -537,6 +541,7 @@ await addUpad('vijay', '2026-10-18', 'given', 50000, 'Family emergency', 'moto')
 await addUpad('kiran', '2026-10-19', 'given', 30000, 'Advance', 'moto')
 await addUpad('mahesh', '2026-10-20', 'given', 20000, 'Advance', 'chalu')
 await addUpad('rekhaben', '2026-10-21', 'given', 10000, 'Advance', 'chalu')
+await addUpad('vijay', '2026-10-22', 'returned', 10000, 'Returned part of the Main upad in cash', 'moto')
 
 function rateForDate(employee, date) {
   const rows = rateRows
@@ -580,6 +585,7 @@ function computeRows(start, end, inputs) {
     if (day(employee.joined_on) > end) continue
     if (spec.key === 'kunal') continue
     if (spec.key === 'rekhaben' && end === '2026-10-15') continue
+    if (spec.key === 'prakash' && start > '2026-10-18') continue
 
     const entries = attendanceRows.filter(
       (record) =>
@@ -763,25 +769,127 @@ const runTwo = await seedPayout({
   },
 })
 
-await addUpad(
-  'vijay',
-  '2026-10-22',
-  'returned',
-  10000,
-  'Returned part of the Main upad in cash',
-  'moto',
-)
+const runThree = await seedPayout({
+  start: '2026-10-16',
+  end: '2026-10-26',
+  note: 'Third pre-Diwali cycle with festival bonus and Prakash settlement',
+  inputs: {
+    kiran: { chaluRecovery: 20000, paid: 120000, note: 'Partial payout, balance carried' },
+    vijay: { chaluRecovery: 30000 },
+    prakash: { paid: 120000, note: 'Final settlement on leaving' },
+    nilesh: { paid: 0, note: 'Unpaid salary carried forward' },
+    bharat: { chaluRecovery: 50000 },
+  },
+})
+
+// ==========================================
+// THIS WEEK (2026-10-27 to 2026-10-31 TODAY)
+// Open cycle opened after 26 Oct
+// ==========================================
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 60, 'Late closing shift')
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-31', 'full', 60, 'Overtime on Saturday')
+  await saveDays('ramesh', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'half', 0, 'Half day doctor appointment')
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-31', 'full', 0)
+  await saveDays('suresh', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-31', 'full', 0)
+  await saveDays('mahesh', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'absent', 0, 'Absent')
+  setStatus(days, '2026-10-31', 'absent', 0, 'Personal leave')
+  await saveDays('kiran', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-31', 'full', 0)
+  await saveDays('vijay', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-30', 'full', 0, 'Friday urgent packing')
+  setStatus(days, '2026-10-31', 'full', 0)
+  await saveDays('rekhaben', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-31', 'full', 0)
+  await saveDays('alpesh', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'absent', 0, 'Absent')
+  setStatus(days, '2026-10-28', 'absent', 0, 'Absent')
+  setStatus(days, '2026-10-29', 'full', 0)
+  // Nilesh is left unmarked on 31 Oct so user can test daily roll-call marking & warnings
+  await saveDays('nilesh', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 90, 'Overtime')
+  setStatus(days, '2026-10-28', 'full', 60, 'Overtime')
+  setStatus(days, '2026-10-29', 'full', 120, 'Overtime')
+  setStatus(days, '2026-10-30', 'full', 60, 'Friday urgent machine run')
+  setStatus(days, '2026-10-31', 'full', 90, 'Overtime today')
+  await saveDays('dinesh', days)
+}
+{
+  const days = new Map()
+  setStatus(days, '2026-10-27', 'full', 0)
+  setStatus(days, '2026-10-28', 'full', 0)
+  setStatus(days, '2026-10-29', 'full', 0)
+  setStatus(days, '2026-10-31', 'full', 0)
+  await saveDays('bharat', days)
+}
+
+// Upads for this week (27 Oct to 31 Oct)
+await addUpad('ramesh', '2026-10-27', 'given', 20000, 'Doctor fee advance', 'chalu')
+await addUpad('vijay', '2026-10-27', 'given', 50000, 'Household advance', 'chalu')
+await addUpad('kiran', '2026-10-27', 'given', 30000, 'Bus pass advance', 'chalu')
+await addUpad('suresh', '2026-10-28', 'given', 20000, 'Daily tea/lunch', 'chalu')
+await addUpad('dinesh', '2026-10-28', 'given', 40000, 'Grocery advance', 'chalu')
+await addUpad('ramesh', '2026-10-29', 'given', 30000, 'Diwali market advance', 'chalu')
+await addUpad('rekhaben', '2026-10-29', 'given', 20000, 'Small home advance', 'chalu')
+await addUpad('vijay', '2026-10-29', 'given', 50000, 'Family hospital advance', 'moto')
+await addUpad('bharat', '2026-10-29', 'returned', 50000, 'Cash return against Moto upad', 'moto')
 
 await pb.collection('audit_log').create({
   action: 'demo.seed',
   entity: 'system',
   entity_id: 'seed-demo',
-  details: `Created ${employeeSpecs.length} employees, ${attendanceRows.length} attendance days, 2 closed payouts and an open October cycle.`,
+  details: `Created ${employeeSpecs.length} employees, ${attendanceRows.length} attendance days, 3 closed payouts and an open cycle (2026-10-27 to 2026-10-31).`,
 })
 
 console.log('Demo data ready.')
 console.log(`Employees: ${employeeSpecs.length}`)
 console.log(`Attendance rows: ${attendanceRows.length}`)
-console.log(`Closed payouts: ${runOne.payout_date.slice(0, 10)}, ${runTwo.payout_date.slice(0, 10)}`)
-console.log('Open cycle starts: 2026-10-16')
-console.log('Edge cases included: mid-cycle joining, rate changes, Friday work, overtime, half days, absences, partial payments, unpaid carry, upad advances, recovery, write-off, inactive employee, rejoined employee, opening balances, future joiner.')
+console.log(`Closed payouts: ${runOne.payout_date.slice(0, 10)}, ${runTwo.payout_date.slice(0, 10)}, ${runThree.payout_date.slice(0, 10)}`)
+console.log('Open cycle starts: 2026-10-27 (runs through 2026-10-31 today)')
+console.log('Edge cases included: mid-cycle joining, rate changes, Friday work, overtime, half days, absences, partial payments, unpaid carry, upad advances, recovery, write-off, inactive employee, rejoined employee, opening balances, future joiner, and this week live data with unmarked testing.')

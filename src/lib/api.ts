@@ -43,39 +43,44 @@ export async function listPeriods(): Promise<EmploymentPeriod[]> {
 
 export async function listAttendance(start: string, end: string): Promise<Attendance[]> {
   return pb.collection(COLLECTIONS.attendance).getFullList<Attendance>({
-    filter: `date >= "${pbDateFilter(start)}" && date <= "${pbDateFilter(end)}"`,
+    filter: `date >= "${dateKey(start)} 00:00:00.000Z" && date <= "${dateKey(end)} 23:59:59.999Z"`,
     sort: 'date,employee',
   })
 }
 
 export async function listAdjustments(start: string, end: string): Promise<Adjustment[]> {
   return pb.collection(COLLECTIONS.adjustments).getFullList<Adjustment>({
-    filter: `date >= "${pbDateFilter(start)}" && date <= "${pbDateFilter(end)}"`,
+    filter: `date >= "${dateKey(start)} 00:00:00.000Z" && date <= "${dateKey(end)} 23:59:59.999Z"`,
     sort: 'date',
   })
 }
 
 export async function listUpadEntries(throughDate?: string): Promise<UpadEntry[]> {
+  const parts: string[] = ['voided != true']
+  if (throughDate) parts.push(`date <= "${dateKey(throughDate)} 23:59:59.999Z"`)
   return pb.collection(COLLECTIONS.upad).getFullList<UpadEntry>({
-    filter: throughDate ? `date <= "${pbDateFilter(throughDate)}"` : '',
+    filter: parts.join(' && '),
     sort: 'date',
   })
 }
 
 export async function listStatements(): Promise<Statement[]> {
   return pb.collection(COLLECTIONS.statements).getFullList<Statement>({
+    filter: 'voided != true',
     sort: '-payout_date',
   })
 }
 
 export async function listRuns(): Promise<PayoutRun[]> {
   return pb.collection(COLLECTIONS.runs).getFullList<PayoutRun>({
+    filter: 'voided != true',
     sort: '-payout_date',
   })
 }
 
 export async function listPayments(): Promise<SalaryPayment[]> {
   return pb.collection(COLLECTIONS.payments).getFullList<SalaryPayment>({
+    filter: 'voided != true',
     sort: '-paid_on',
   })
 }
@@ -296,12 +301,15 @@ export async function createAdjustment(input: {
   employeeId: string
   date: string
   amountPaise: number
+  kind?: 'bonus' | 'reimbursement' | 'deduction'
   note?: string
 }): Promise<Adjustment> {
+  const kind = input.kind || (input.amountPaise < 0 ? 'deduction' : 'bonus')
   const record = await pb.collection(COLLECTIONS.adjustments).create<Adjustment>({
     employee: input.employeeId,
     date: input.date.includes(' ') ? input.date : `${dateKey(input.date)} 00:00:00.000Z`,
     amount_paise: input.amountPaise,
+    kind,
     note: input.note || '',
   })
   await audit('adjustment.create', 'adjustments', record.id, `${input.amountPaise}`)
@@ -319,17 +327,23 @@ export async function createUpadEntry(input: {
   kind: UpadKind
   amountPaise: number
   category?: UpadCategory
+  bucket?: 'chalu' | 'moto'
   note?: string
   statementId?: string
 }): Promise<UpadEntry> {
+  const resolvedBucket =
+    input.bucket ??
+    (input.category === 'moto' || input.category === 'extra' ? 'moto' : 'chalu')
   const record = await pb.collection(COLLECTIONS.upad).create<UpadEntry>({
     employee: input.employeeId,
-    date: input.date,
+    date: input.date.includes(' ') ? input.date : `${dateKey(input.date)} 00:00:00.000Z`,
     kind: input.kind,
-    category: input.category || 'regular',
+    category: resolvedBucket,
+    bucket: resolvedBucket,
     amount_paise: Math.abs(input.amountPaise),
     note: input.note || '',
     statement: input.statementId || '',
+    voided: false,
   })
   await audit(`upad.${input.kind}`, 'upad_entries', record.id, `${input.amountPaise}`)
   return record

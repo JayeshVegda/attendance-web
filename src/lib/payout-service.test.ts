@@ -82,6 +82,7 @@ describe("payout service against live pocketbase", () => {
           const blocked = await undoPayout(s1.runId);
           expect(blocked).toEqual({ ok: false, reason: "not_latest", workers: [t2.employee.name] });
           await undoPayout(s2.runId);
+          await undoPayout(s1.runId);
         } else {
           const undo = await undoPayout(s1.runId);
           expect(undo).toEqual({ ok: true });
