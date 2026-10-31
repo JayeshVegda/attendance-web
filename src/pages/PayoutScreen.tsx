@@ -46,6 +46,18 @@ type RowInputState = {
   nb?: 'chalu' | 'moto' // legacy fallback
 }
 
+function getRowInput(inputs: Record<string, RowInputState>, empId: string): RowInputState {
+  const cur = inputs[empId]
+  return {
+    cr: cur?.cr ?? '',
+    mr: cur?.mr ?? '',
+    ngChalu: cur?.ngChalu ?? (cur?.nb === 'chalu' ? (cur.ng ?? '') : ''),
+    ngMoto: cur?.ngMoto ?? (cur?.nb === 'moto' ? (cur.ng ?? '') : ''),
+    adj: cur?.adj ?? '',
+    sp: cur?.sp ?? '',
+  }
+}
+
 const STATUS_LETTER: Record<string, string> = { full: 'P', half: 'H', absent: 'A' }
 
 export default function PayoutScreen({
@@ -89,11 +101,11 @@ export default function PayoutScreen({
     }))
 
     return contextsQuery.data.map((ctx) => {
-      const inp = inputs[ctx.employee.id] || { cr: '', mr: '', ngChalu: '', ngMoto: '', adj: '', sp: '' }
+      const inp = getRowInput(inputs, ctx.employee.id)
       const crPaise = parseMoneyInput(inp.cr)
       const mrPaise = parseMoneyInput(inp.mr)
-      const ngChaluPaise = parseMoneyInput(inp.ngChalu || (inp.nb === 'chalu' ? (inp.ng ?? '') : ''))
-      const ngMotoPaise = parseMoneyInput(inp.ngMoto || (inp.nb === 'moto' ? (inp.ng ?? '') : ''))
+      const ngChaluPaise = parseMoneyInput(inp.ngChalu)
+      const ngMotoPaise = parseMoneyInput(inp.ngMoto)
       const adjPaise = parseMoneyInput(inp.adj)
       const totalNewUpadPaise = ngChaluPaise + ngMotoPaise
 
@@ -303,7 +315,7 @@ export default function PayoutScreen({
 
   const setRowField = (empId: string, field: keyof RowInputState, val: string) => {
     setInputs((prev) => {
-      const cur = prev[empId] || { cr: '', mr: '', ngChalu: '', ngMoto: '', adj: '', sp: '' }
+      const cur = getRowInput(prev, empId)
       return { ...prev, [empId]: { ...cur, [field]: val } }
     })
   }
@@ -321,9 +333,9 @@ export default function PayoutScreen({
         cutoff,
         note: '',
         rows: cleanSelectedRows.map((r) => {
-          const inp = inputs[r.context.employee.id] || { cr: '', mr: '', ngChalu: '', ngMoto: '', adj: '', sp: '' }
-          const ngChaluPaise = parseMoneyInput(inp.ngChalu || (inp.nb === 'chalu' ? (inp.ng ?? '') : ''))
-          const ngMotoPaise = parseMoneyInput(inp.ngMoto || (inp.nb === 'moto' ? (inp.ng ?? '') : ''))
+          const inp = getRowInput(inputs, r.context.employee.id)
+          const ngChaluPaise = parseMoneyInput(inp.ngChalu)
+          const ngMotoPaise = parseMoneyInput(inp.ngMoto)
           const adjPaise = parseMoneyInput(inp.adj)
           const totalNewUpad = ngChaluPaise + ngMotoPaise
           return {
@@ -529,7 +541,7 @@ export default function PayoutScreen({
               const emp = r.context.employee
               const c = r.computation
               const isTicked = !!selected[emp.id]
-              const inp = inputs[emp.id] || { cr: '', mr: '', ng: '', nb: 'chalu', sp: '' }
+              const inp = getRowInput(inputs, emp.id)
               const isInactive = !emp.active
 
               const handleQuickSettle = () => {
@@ -544,7 +556,9 @@ export default function PayoutScreen({
                     cr: crVal > 0 ? (crVal / 100).toString() : '',
                     mr: mrVal > 0 ? (mrVal / 100).toString() : '',
                     sp: (netAfter / 100).toString(),
-                    ng: '',
+                    ngChalu: '',
+                    ngMoto: '',
+                    adj: '',
                   },
                 }))
               }
@@ -1037,7 +1051,7 @@ export default function PayoutScreen({
                 const emp = r.context.employee
                 const c = r.computation
                 const isTicked = !!selected[emp.id]
-                const inp = inputs[emp.id] || { cr: '', mr: '', ng: '', nb: 'chalu', sp: '' }
+                const inp = getRowInput(inputs, emp.id)
                 const isInactive = !emp.active
 
                 const handleQuickSettle = () => {
@@ -1052,7 +1066,9 @@ export default function PayoutScreen({
                       cr: crVal > 0 ? (crVal / 100).toString() : '',
                       mr: mrVal > 0 ? (mrVal / 100).toString() : '',
                       sp: (netAfter / 100).toString(),
-                      ng: '',
+                      ngChalu: '',
+                      ngMoto: '',
+                      adj: '',
                     },
                   }))
                 }

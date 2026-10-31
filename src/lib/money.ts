@@ -1,5 +1,6 @@
-export function rupeesToPaise(value: number | string): number {
-  const amount = typeof value === 'number' ? value : Number.parseFloat(value.replace(/,/g, ''))
+export function rupeesToPaise(value: number | string | null | undefined): number {
+  if (value === null || value === undefined || value === '') return 0
+  const amount = typeof value === 'number' ? value : Number.parseFloat(String(value).replace(/,/g, ''))
   if (!Number.isFinite(amount)) return 0
   return Math.round(amount * 100)
 }
@@ -22,7 +23,7 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat('en-IN').format(value)
 }
 
-export function parseMoneyInput(value: string): number {
+export function parseMoneyInput(value: string | number | null | undefined): number {
   return rupeesToPaise(value)
 }
 
