@@ -14,14 +14,16 @@ import {
 import clsx from 'clsx'
 import {
   createEmployee,
+  getPayrollData,
   listEmployees,
   listRates,
   listStatements,
   listUpadEntries,
 } from '../lib/api'
-import { formatDateLong, todayKey } from '../lib/dates'
+import { otDivisor } from '../lib/cycle'
+import { addDays, formatDateLong, todayKey } from '../lib/dates'
 import { formatMoney, parseMoneyInput } from '../lib/money'
-import { latestStatementByEmployee, upadBalanceForEmployee } from '../lib/payroll'
+import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
 import { UpadModal } from '../components/UpadModal'
 import { useToast } from '../components/Toast'
 import {
@@ -54,6 +56,10 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
   const ratesQuery = useQuery({ queryKey: ['rates'], queryFn: listRates })
   const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
+  const today = todayKey()
+  const cycleStart = useMemo(() => addDays(today, -30), [today])
+  const payrollQuery = useQuery({ queryKey: ['payroll', cycleStart, today], queryFn: () => getPayrollData(cycleStart, today) })
+  const divisor = otDivisor(payrollQuery.data?.settings)
 
   const employees = employeesQuery.data ?? []
   const latestStatements = useMemo(
@@ -76,23 +82,35 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
   }, [employees, filter, search])
 
   const totals = useMemo(() => {
-    const active = employees.filter((employee) => employee.active)
+    // Exclude future joiners from active staff count and wage bill
+    const currentlyActive = employees.filter((employee) => employee.active && (!employee.joined_on || employee.joined_on <= today))
+    const totalCarryAll = employees.reduce(
+      (sum, employee) => sum + (latestStatements.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
+      0,
+    )
+    const totalCarryActive = currentlyActive.reduce(
+      (sum, employee) => sum + (latestStatements.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
+      0,
+    )
+    const totalUpadAll = employees.reduce(
+      (sum, employee) => sum + upadBalanceForEmployee(employee, upadQuery.data ?? []),
+      0,
+    )
+    const totalUpadActive = currentlyActive.reduce(
+      (sum, employee) => sum + upadBalanceForEmployee(employee, upadQuery.data ?? []),
+      0,
+    )
+
     return {
-      active: active.length,
+      active: currentlyActive.length,
       totalCount: employees.length,
-      dailyWage: active.reduce((sum, employee) => sum + employee.daily_rate_paise, 0),
-      salaryDue: active.reduce(
-        (sum, employee) =>
-          sum +
-          (latestStatements.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
-        0,
-      ),
-      upad: active.reduce(
-        (sum, employee) => sum + upadBalanceForEmployee(employee, upadQuery.data ?? []),
-        0,
-      ),
+      dailyWage: currentlyActive.reduce((sum, employee) => sum + employee.daily_rate_paise, 0),
+      salaryDue: totalCarryAll,
+      salaryDueActive: totalCarryActive,
+      upad: totalUpadAll,
+      upadActive: totalUpadActive,
     }
-  }, [employees, latestStatements, upadQuery.data])
+  }, [employees, latestStatements, upadQuery.data, today])
 
   const loading = employeesQuery.isLoading || ratesQuery.isLoading
 
@@ -115,26 +133,26 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
         <Stat
           label="Active Staff"
           value={totals.active}
-          hint={`${totals.totalCount} total staff records`}
+          hint={`${totals.totalCount} staff records (${totals.totalCount - totals.active} inactive/future)`}
           icon={<Users className="h-5 w-5" />}
           tone="teal"
         />
         <Stat
           label="Daily Wage Bill"
           value={formatMoney(totals.dailyWage)}
-          hint="Sum of current active rates"
+          hint={`Sum of current ${totals.active} active rates`}
           icon={<Wallet className="h-5 w-5" />}
         />
         <Stat
           label="Salary Due"
           value={formatMoney(totals.salaryDue)}
-          hint="Unpaid carry-forward salary"
+          hint={`Active: ${formatMoney(totals.salaryDueActive)} · Inactive: ${formatMoney(totals.salaryDue - totals.salaryDueActive)}`}
           tone="amber"
         />
         <Stat
           label="Upad Outstanding"
           value={formatMoney(totals.upad)}
-          hint="Advances across active staff"
+          hint={`Active: ${formatMoney(totals.upadActive)} · Inactive: ${formatMoney(totals.upad - totals.upadActive)}`}
           tone="red"
           icon={<HandCoins className="h-5 w-5" />}
         />
@@ -207,8 +225,19 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
         <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
           {filtered.map((employee) => {
             const latest = latestStatements.get(employee.id)
-            const salaryDue = latest?.closing_paise ?? employee.opening_salary_paise ?? 0
-            const upad = upadBalanceForEmployee(employee, upadQuery.data ?? [])
+            const carry = latest?.closing_paise ?? employee.opening_salary_paise ?? 0
+            const employeeAttendance = payrollQuery.data?.attendance?.filter((a) => a.employee === employee.id && !a.settled_payout) ?? []
+            let earnedCycle = 0
+            for (const a of employeeAttendance) {
+              const r = getRateForDate(employee, ratesQuery.data ?? [], a.date)
+              earnedCycle += dayPayPaise(a.status, a.ot_minutes || 0, r, divisor)
+            }
+            const employeeAdjustments = payrollQuery.data?.adjustments?.filter((adj) => adj.employee === employee.id && !adj.settled_payout) ?? []
+            const adjustmentCycle = employeeAdjustments.reduce((sum, adj) => sum + (adj.amount_paise || 0), 0)
+            const owedNow = carry + earnedCycle + adjustmentCycle
+
+            const upadBreakdown = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
+            const upadTotal = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
 
             return (
               <Card
@@ -264,7 +293,7 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
                     <div
                       className={clsx(
                         'rounded-xl border px-3 py-2',
-                        salaryDue > 0
+                        owedNow > 0
                           ? 'border-amber-200 bg-amber-50/80'
                           : 'border-stone-200/80 bg-stone-50/70',
                       )}
@@ -272,53 +301,71 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
                       <div
                         className={clsx(
                           'text-[10px] font-bold uppercase tracking-wider',
-                          salaryDue > 0 ? 'text-amber-700' : 'text-stone-400',
+                          owedNow > 0 ? 'text-amber-700' : 'text-stone-400',
                         )}
                       >
-                        Salary Due
+                        Owed Now
                       </div>
                       <div
                         className={clsx(
                           'mt-0.5 text-sm font-black tabular-nums',
-                          salaryDue > 0 ? 'text-amber-800' : 'text-stone-900',
+                          owedNow > 0 ? 'text-amber-800' : 'text-stone-900',
                         )}
                       >
-                        {formatMoney(salaryDue, { showZero: true })}
+                        {formatMoney(owedNow, { showZero: true })}
+                      </div>
+                      <div className="text-[10px] text-stone-500 font-medium truncate">
+                        Carry in: {formatMoney(carry)}
                       </div>
                     </div>
                   </div>
 
                   {/* Upad status */}
-                  <div className="mt-3 flex items-center justify-between rounded-xl bg-stone-50/60 px-3 py-2 text-xs">
-                    <span className="text-stone-500">Upad Balance:</span>
-                    <span
-                      className={clsx(
-                        'font-black tabular-nums',
-                        upad > 0 ? 'text-rose-600' : 'text-stone-700',
-                      )}
-                    >
-                      {formatMoney(upad, { showZero: true })}
-                    </span>
+                  <div className="mt-3 rounded-xl bg-stone-50/60 px-3 py-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-stone-500 font-medium">Upad Total:</span>
+                      <span
+                        className={clsx(
+                          'font-black tabular-nums',
+                          upadTotal > 0 ? 'text-rose-600' : 'text-stone-700',
+                        )}
+                      >
+                        {formatMoney(upadTotal, { showZero: true })}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-stone-500 font-medium text-right">
+                      Chalu: <span className="font-bold text-stone-700">{formatMoney(upadBreakdown.chaluPaise)}</span> · Main: <span className="font-bold text-stone-700">{formatMoney(upadBreakdown.motoPaise)}</span>
+                    </div>
                   </div>
                 </div>
 
                 {/* Card actions footer */}
-                <div className="mt-4 flex items-center justify-between border-t border-stone-100 pt-3">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-1 border-t border-stone-100 pt-3">
                   <button
                     type="button"
                     onClick={() => setUpadTargetId(employee.id)}
-                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-50 transition"
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50 transition"
                   >
                     <HandCoins className="h-3.5 w-3.5" />
-                    <span>+ Give Upad</span>
+                    <span>+ Upad</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(`payout?worker=${employee.id}`)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-100 border border-emerald-200 transition"
+                    title={`Open payout for ${employee.name}`}
+                  >
+                    <Wallet className="h-3.5 w-3.5 text-emerald-700" />
+                    <span>Pay Now</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => onNavigate(`employees/${employee.id}`)}
-                    className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold text-teal-700 hover:bg-teal-50 transition"
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-teal-700 hover:bg-teal-50 transition"
                   >
-                    <span>View Profile</span>
+                    <span>Profile</span>
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                 </div>

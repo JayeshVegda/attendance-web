@@ -12,7 +12,8 @@ export function settingValue(settings: SettingsMap, key: string): string {
   return settings[key] ?? DEFAULT_SETTINGS[key] ?? ''
 }
 
-export function otDivisor(settings: SettingsMap): number {
+export function otDivisor(settings?: SettingsMap): number {
+  if (!settings) return 8
   const parsed = Number.parseFloat(settingValue(settings, 'ot_divisor'))
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 8
 }

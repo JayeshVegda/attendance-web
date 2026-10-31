@@ -488,34 +488,70 @@ export function ConfirmDialog({
   )
 }
 
-export function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
+export function Avatar({
+  name,
+  employeeNo,
+  size = 'md',
+}: {
+  name: string
+  employeeNo?: string | number
+  size?: 'sm' | 'md' | 'lg'
+}) {
+  const parts = name.split(/\s+/).filter(Boolean)
+  const initials = parts
     .slice(0, 2)
     .map((part) => part[0])
     .join('')
     .toUpperCase()
+
   const palette = [
     'bg-emerald-100 text-emerald-900 ring-1 ring-emerald-700/20',
-    'bg-amber-100 text-amber-900 ring-1 ring-amber-700/20',
     'bg-sky-100 text-sky-900 ring-1 ring-sky-700/20',
+    'bg-amber-100 text-amber-900 ring-1 ring-amber-700/20',
     'bg-violet-100 text-violet-900 ring-1 ring-violet-700/20',
     'bg-rose-100 text-rose-900 ring-1 ring-rose-700/20',
     'bg-teal-100 text-teal-900 ring-1 ring-teal-700/20',
+    'bg-indigo-100 text-indigo-900 ring-1 ring-indigo-700/20',
+    'bg-orange-100 text-orange-900 ring-1 ring-orange-700/20',
   ]
-  const tone = palette[(name.charCodeAt(0) || 0) % palette.length]
+
+  // Robust hash using full name characters + worker number
+  let hash = 0
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash << 5) - hash + name.charCodeAt(i)
+    hash |= 0
+  }
+  if (employeeNo) {
+    const num = typeof employeeNo === 'number' ? employeeNo : parseInt(String(employeeNo), 10) || 0
+    hash = hash * 31 + num
+  }
+  const tone = palette[Math.abs(hash) % palette.length]
+
   return (
-    <div
-      className={cn(
-        'flex shrink-0 items-center justify-center rounded-xl font-black select-none',
-        tone,
-        size === 'sm' && 'h-7 w-7 text-[10px]',
-        size === 'md' && 'h-8.5 w-8.5 text-xs',
-        size === 'lg' && 'h-11 w-11 text-sm',
+    <div className="relative inline-flex shrink-0">
+      <div
+        className={cn(
+          'flex shrink-0 items-center justify-center rounded-xl font-black select-none',
+          tone,
+          size === 'sm' && 'h-7 w-7 text-[10px]',
+          size === 'md' && 'h-8.5 w-8.5 text-xs',
+          size === 'lg' && 'h-11 w-11 text-sm',
+        )}
+      >
+        {initials || '?'}
+      </div>
+      {employeeNo && (
+        <span
+          className={cn(
+            'absolute -bottom-1 -right-1 flex items-center justify-center rounded-full bg-stone-900 font-bold text-white shadow-xs',
+            size === 'sm' && 'h-3.5 w-3.5 text-[8px]',
+            size === 'md' && 'h-4 w-4 text-[9px]',
+            size === 'lg' && 'h-5 w-5 text-[10px]',
+          )}
+        >
+          {employeeNo}
+        </span>
       )}
-    >
-      {initials || '?'}
     </div>
   )
 }

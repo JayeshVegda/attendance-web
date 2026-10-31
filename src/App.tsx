@@ -11,14 +11,16 @@ import SettingsPage from './pages/SettingsPage'
 
 type Route = { view: View; id?: string }
 
-const VIEWS: View[] = ['attendance', 'employees', 'upad', 'reports', 'settings']
+const VIEWS: View[] = ['attendance', 'payout', 'employees', 'upad', 'reports', 'settings']
 
 function parseHash(): Route {
   const raw = window.location.hash.replace(/^#\/?/, '')
   const [first, second] = raw.split('/')
-  if (first === 'payout') return { view: 'attendance', id: 'payout' }
-  const view = (VIEWS.includes(first as View) ? first : 'attendance') as View
-  return { view, id: second || undefined }
+  const baseView = first.split('?')[0]
+  const query = first.includes('?') ? first.slice(first.indexOf('?')) : undefined
+  if (baseView === 'payout') return { view: 'payout', id: query }
+  const view = (VIEWS.includes(baseView as View) ? baseView : 'attendance') as View
+  return { view, id: second || query }
 }
 
 export default function App() {
@@ -32,7 +34,8 @@ export default function App() {
 
   useEffect(() => {
     const names: Record<View, string> = {
-      attendance: 'Attendance & Payout',
+      attendance: 'Attendance',
+      payout: 'Issue Payout',
       employees: 'Employees',
       upad: 'Upad',
       reports: 'Reports',
@@ -53,14 +56,15 @@ export default function App() {
     page = <EmployeeDetailPage employeeId={route.id} onNavigate={navigate} />
   } else if (route.view === 'employees') {
     page = <EmployeesPage onNavigate={navigate} />
+  } else if (route.view === 'payout') {
+    const workerMatch = route.id?.match(/worker=([^&]+)/)
+    page = <PayoutScreen onNavigate={navigate} initialWorkerId={workerMatch ? workerMatch[1] : undefined} />
   } else if (route.view === 'upad') {
     page = <UpadPage onNavigate={navigate} />
   } else if (route.view === 'reports') {
     page = <ReportsPage runId={route.id} onNavigate={navigate} />
   } else if (route.view === 'settings') {
     page = <SettingsPage />
-  } else if (route.id === 'payout') {
-    page = <PayoutScreen onNavigate={navigate} />
   } else {
     page = <AttendancePage onNavigate={navigate} />
   }

@@ -17,6 +17,7 @@ import {
 import clsx from 'clsx'
 import {
   addRate,
+  listAdjustments,
   listAttendance,
   listEmployees,
   listPayments,
@@ -81,6 +82,10 @@ export default function EmployeeDetailPage({
   const attendanceQuery = useQuery({
     queryKey: ['employee-attendance', employeeId],
     queryFn: () => listAttendance(addDays(todayKey(), -90), todayKey()),
+  })
+  const adjustmentsQuery = useQuery({
+    queryKey: ['employee-adjustments', employeeId],
+    queryFn: () => listAdjustments(addDays(todayKey(), -90), todayKey()),
   })
 
   const employee = employeesQuery.data?.find((entry) => entry.id === employeeId)
@@ -149,7 +154,18 @@ export default function EmployeeDetailPage({
 
   const today = todayKey()
   const currentRate = getRateForDate(employee, rates, today)
-  const salaryDue = latestStatement?.closing_paise ?? employee.opening_salary_paise ?? 0
+  const carry = latestStatement?.closing_paise ?? employee.opening_salary_paise ?? 0
+  const salaryDue = carry
+  const unsettledAtt = attendance.filter((a) => !a.settled_payout)
+  let earnedCycle = 0
+  for (const a of unsettledAtt) {
+    const rate = getRateForDate(employee, rates, a.date)
+    earnedCycle += dayPayPaise(a.status, a.ot_minutes || 0, rate)
+  }
+  const unsettledAdj = (adjustmentsQuery.data ?? []).filter((adj) => adj.employee === employeeId && !adj.settled_payout)
+  const adjCycle = unsettledAdj.reduce((sum, adj) => sum + (adj.amount_paise || 0), 0)
+  const owedNow = carry + earnedCycle + adjCycle
+
   const upadBreakdown = upadBreakdownForEmployee(employee, upadEntries, today)
   const upadBalance = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
   const totalPaid = payments.reduce((sum, payment) => sum + payment.amount_paise, 0)
@@ -211,7 +227,14 @@ export default function EmployeeDetailPage({
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-md border-0"
+                onClick={() => onNavigate(`payout?worker=${employee.id}`)}
+              >
+                <Wallet className="h-4 w-4" />
+                <span>Pay Worker Now</span>
+              </Button>
               <Button
                 variant="secondary"
                 className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
@@ -253,15 +276,18 @@ export default function EmployeeDetailPage({
           </div>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-              Salary Due
+              Owed Now
             </div>
             <div
               className={clsx(
                 'mt-1 text-xl font-black tabular-nums',
-                salaryDue > 0 ? 'text-amber-700' : 'text-stone-900',
+                owedNow > 0 ? 'text-amber-700' : 'text-stone-900',
               )}
             >
-              {formatMoney(salaryDue, { showZero: true })}
+              {formatMoney(owedNow, { showZero: true })}
+            </div>
+            <div className="text-[10px] font-bold text-stone-500 mt-0.5">
+              Carry: {formatMoney(carry)} · Cycle: {formatMoney(earnedCycle + adjCycle)}
             </div>
           </div>
           <div>

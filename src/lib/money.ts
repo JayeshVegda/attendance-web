@@ -39,3 +39,26 @@ export function formatHours(minutes: number): string {
   if (!rest) return `${hours}h`
   return `${hours}h ${rest}m`
 }
+
+export type DenominationCount = {
+  note: number
+  count: number
+  amount: number
+}
+
+export function calculateDenominations(totalPaise: number): {
+  notes: DenominationCount[]
+  coins: number
+} {
+  let rupees = Math.floor(Math.max(0, totalPaise) / 100)
+  const DENOMS = [500, 200, 100, 50, 20, 10]
+  const notes: DenominationCount[] = []
+  for (const note of DENOMS) {
+    const count = Math.floor(rupees / note)
+    if (count > 0) {
+      notes.push({ note, count, amount: count * note })
+      rupees %= note
+    }
+  }
+  return { notes, coins: rupees }
+}

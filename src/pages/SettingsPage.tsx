@@ -14,6 +14,7 @@ import { getSettings, listEmployees, listRuns, saveSetting } from '../lib/api'
 import { DEFAULT_SETTINGS } from '../lib/cycle'
 import { pb } from '../lib/pb'
 import { useToast } from '../components/Toast'
+import { getLanguage, setLanguage, type LanguageMode } from '../lib/i18n'
 import {
   Badge,
   Button,
@@ -35,6 +36,12 @@ const WEEKDAYS = [
   { value: '6', label: 'Saturday' },
 ]
 
+const LANGUAGES = [
+  { value: 'mixed', label: 'ગુજરાતી + English (Mixed / ભલામણ કરેલ)' },
+  { value: 'gu', label: 'માત્ર ગુજરાતી (Gujarati Only)' },
+  { value: 'en', label: 'English Only' },
+]
+
 export default function SettingsPage() {
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
@@ -46,6 +53,7 @@ export default function SettingsPage() {
   const [firstCycleStart, setFirstCycleStart] = useState('')
   const [otDivisor, setOtDivisor] = useState('8')
   const [payoutWeekday, setPayoutWeekday] = useState('5')
+  const [language, setLangState] = useState<LanguageMode>(() => getLanguage())
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -60,11 +68,13 @@ export default function SettingsPage() {
 
   const mutation = useMutation({
     mutationFn: async () => {
+      setLanguage(language)
       await Promise.all([
         saveSetting('business_name', businessName.trim() || DEFAULT_SETTINGS.business_name),
         saveSetting('first_cycle_start', firstCycleStart),
         saveSetting('ot_divisor', String(Number.parseFloat(otDivisor) || 8)),
         saveSetting('expected_payout_weekday', payoutWeekday),
+        saveSetting('app_language', language),
       ])
     },
     onSuccess: () => {
@@ -157,6 +167,23 @@ export default function SettingsPage() {
                   value={otDivisor}
                   onChange={(event) => setOtDivisor(event.target.value)}
                 />
+              </Field>
+
+              <Field
+                label="Language / ભાષા"
+                hint="Display language across attendance, payouts, and reports."
+                className="sm:col-span-2"
+              >
+                <Select
+                  value={language}
+                  onChange={(event) => setLangState(event.target.value as LanguageMode)}
+                >
+                  {LANGUAGES.map((lang) => (
+                    <option key={lang.value} value={lang.value}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </Select>
               </Field>
 
               <Field

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { listEmployees, listUpadEntries } from '../lib/api'
-import { dateKey, formatDateShort, monthKey, todayKey } from '../lib/dates'
+import { dateKey, daysBetweenInclusive, formatDateShort, monthKey, todayKey } from '../lib/dates'
 import { formatMoney } from '../lib/money'
 import { upadBreakdownForEmployee } from '../lib/payroll'
 import type { UpadKind } from '../lib/types'
@@ -58,19 +58,39 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
     return employees
       .map((employee) => {
         const breakdown = upadBreakdownForEmployee(employee, entries, today)
+        const empEntries = entries.filter((entry) => entry.employee === employee.id)
+        const sorted = [...empEntries].sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)))
+        const oldestGiven = empEntries
+          .filter((e) => e.kind === 'given')
+          .sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)))[0]
+        const openDays = oldestGiven ? Math.max(0, daysBetweenInclusive(oldestGiven.date, today) - 1) : 0
         return {
           employee,
           balance: breakdown.chaluPaise + breakdown.motoPaise,
           chalu: breakdown.chaluPaise,
           moto: breakdown.motoPaise,
-          lastEntry: entries
-            .filter((entry) => entry.employee === employee.id)
-            .sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)))[0],
+          lastEntry: sorted[0],
+          oldestGiven,
+          openDays,
         }
       })
       .filter((row) => row.balance > 0)
       .sort((a, b) => b.balance - a.balance)
   }, [employees, entries, today])
+
+  const runningBalances = useMemo(() => {
+    const sortedAsc = [...entries].sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || (a.created ?? '').localeCompare(b.created ?? ''))
+    const map = new Map<string, number>()
+    const perEmployee = new Map<string, number>()
+    for (const e of sortedAsc) {
+      const cur = perEmployee.get(e.employee) ?? 0
+      const delta = e.kind === 'given' ? e.amount_paise : -e.amount_paise
+      const next = Math.max(0, cur + delta)
+      perEmployee.set(e.employee, next)
+      map.set(e.id, next)
+    }
+    return map
+  }, [entries])
 
   const totals = useMemo(() => {
     const monthEntries = entries.filter((entry) => dateKey(entry.date).startsWith(thisMonth))
@@ -212,7 +232,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
           </div>
         ) : (
           <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-            {balances.map(({ employee, balance, chalu, moto, lastEntry }) => (
+            {balances.map(({ employee, balance, chalu, moto, lastEntry, openDays }) => (
               <div
                 key={employee.id}
                 className="group flex flex-col justify-between rounded-2xl border border-stone-200 bg-white p-3.5 shadow-xs transition hover:border-amber-300 hover:shadow-md"
@@ -245,9 +265,25 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                       </div>
                     </div>
                   </div>
+
+                  {openDays > 0 && (
+                    <div className="mt-2.5 flex items-center justify-between text-[11px]">
+                      <span className="text-stone-400 font-medium">Advance age:</span>
+                      <span
+                        className={clsx(
+                          'rounded-md px-1.5 py-0.5 font-bold tabular-nums text-[10px]',
+                          openDays >= 14
+                            ? 'border border-amber-300 bg-amber-100 text-amber-900'
+                            : 'bg-stone-100 text-stone-700',
+                        )}
+                      >
+                        Open for {openDays} days
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-3 flex items-center justify-end gap-2 border-t border-stone-100 pt-2.5">
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5 border-t border-stone-100 pt-2.5">
                   <button
                     type="button"
                     onClick={() => openModal(employee.id, 'returned')}
@@ -261,6 +297,14 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                     className="rounded-lg px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50 transition"
                   >
                     + Give Upad
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openModal(employee.id, 'writeoff')}
+                    className="rounded-lg px-2 py-1 text-xs font-bold text-rose-700 hover:bg-rose-50 transition"
+                    title="Write off uncollectable upad advance"
+                  >
+                    Write Off
                   </button>
                 </div>
               </div>
@@ -311,6 +355,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                   <th className="px-4 py-2.5">Employee</th>
                   <th className="px-4 py-2.5">Type & Bucket</th>
                   <th className="px-4 py-2.5 text-right">Amount</th>
+                  <th className="px-4 py-2.5 text-right">Running Bal</th>
                   <th className="px-4 py-2.5">Note</th>
                   <th className="px-4 py-2.5">Source</th>
                 </tr>
@@ -371,6 +416,9 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                       >
                         {positive ? '+' : '−'}
                         {formatMoney(entry.amount_paise)}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-bold text-stone-800 tabular-nums">
+                        {formatMoney(runningBalances.get(entry.id) ?? 0)}
                       </td>
                       <td className="max-w-[18rem] truncate px-4 py-3 text-xs text-stone-600">
                         {entry.note || '—'}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
+  ArrowRight,
   CalendarCheck,
   CalendarDays,
   CheckCircle2,
@@ -10,6 +11,7 @@ import {
   HandCoins,
   History,
   Layers,
+  Lock,
   Pencil,
   Plus,
   RotateCcw,
@@ -162,6 +164,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'active' | 'unmarkedToday'>('all')
   const [bulkMenuDate, setBulkMenuDate] = useState<string | null>(null)
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const bulkMenuRef = useRef<HTMLDivElement>(null)
 
   const [coarsePointer] = useState(
@@ -237,16 +240,19 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const displayRows = useMemo(() => {
     const term = search.trim().toLowerCase()
     return rows.filter((row) => {
-      if (filterType === 'active' && !row.employee.active) return false
+      const e = row.employee
+      const hasJoined = !e.joined_on || e.joined_on <= today
+      if (filterType === 'active' && (!e.active || !hasJoined)) return false
       if (filterType === 'unmarkedToday') {
-        const rec = attendanceMap.get(keyFor(row.employee.id, today))
-        if (rec) return false
+        if (!e.active || !hasJoined) return false
+        const rec = attendanceMap.get(keyFor(e.id, today))
+        if (rec && rec.status) return false
       }
       if (!term) return true
       return (
-        row.employee.name.toLowerCase().includes(term) ||
-        row.employee.employee_no.toLowerCase().includes(term) ||
-        row.employee.phone.toLowerCase().includes(term)
+        e.name.toLowerCase().includes(term) ||
+        e.employee_no.toLowerCase().includes(term) ||
+        e.phone.toLowerCase().includes(term)
       )
     })
   }, [rows, search, filterType, attendanceMap, today])
@@ -310,16 +316,19 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
     let absent = 0
     let activeTotal = 0
     for (const row of rows) {
-      if (row.employee.active) {
+      const e = row.employee
+      const hasJoined = !e.joined_on || e.joined_on <= today
+      if (e.active && hasJoined) {
         activeTotal += 1
-        const record = attendanceMap.get(keyFor(row.employee.id, today))
+        const record = attendanceMap.get(keyFor(e.id, today))
         if (record?.status === 'full') present += 1
         else if (record?.status === 'half') half += 1
         else if (record?.status === 'absent') absent += 1
       }
     }
+    const marked = present + half + absent
     const percent = activeTotal > 0 ? Math.round(((present + half * 0.5) / activeTotal) * 100) : 0
-    return { present, half, absent, activeTotal, percent }
+    return { present, half, absent, marked, activeTotal, percent }
   }, [rows, attendanceMap, today])
 
   const saveMutation = useMutation({
@@ -392,9 +401,13 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   // Bulk marking mutation
   const bulkMutation = useMutation({
     mutationFn: async ({ date, status }: { date: string; status: AttendanceStatus | null }) => {
-      const activeRows = rows.filter((r) => r.employee.active)
+      const activeRows = rows.filter((r) => {
+        const e = r.employee
+        return e.active && (!e.joined_on || e.joined_on <= date)
+      })
       for (const r of activeRows) {
         const record = attendanceMap.get(keyFor(r.employee.id, date))
+        if (record?.settled_payout) continue
         if (!status) {
           await deleteAttendance(record?.id, r.employee.id, date)
         } else {
@@ -651,7 +664,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   {formatDateLong(today)}
                 </span>
                 <Badge tone="green" dot>
-                  {todayStats.present} / {todayStats.activeTotal} Marked
+                  {todayStats.marked} / {todayStats.activeTotal} Marked
                 </Badge>
               </div>
               <div className="flex items-center gap-2">
@@ -666,7 +679,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => bulkMutation.mutate({ date: today, status: null })}
+                  onClick={() => setClearConfirmOpen(true)}
                 >
                   <Trash2 className="h-3.5 w-3.5 text-stone-400" />
                   <span>Clear Today</span>
@@ -797,29 +810,30 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                       <span>Absent</span>
                     </button>
 
-                    {/* Overtime & Note Button */}
+                    {/* Overtime & Note Button (Fixed Width so P/H/A buttons align across rows) */}
                     <button
                       type="button"
                       onClick={() => setEditor({ employeeId: employee.id, date: today })}
                       className={clsx(
-                        'flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all border',
+                        'flex items-center justify-center gap-1 rounded-xl px-2.5 py-1.5 text-xs font-semibold transition-all border w-24 shrink-0',
                         hasOt
                           ? 'border-stone-900 bg-stone-900 text-white'
                           : 'border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:text-stone-800',
                       )}
                       title="Add overtime or note"
                     >
-                      <span>{hasOt ? `+${formatHours(record.ot_minutes)} OT` : '+ OT'}</span>
+                      <span className="truncate">{hasOt ? `+${formatHours(record.ot_minutes)} OT` : '+ OT'}</span>
                     </button>
 
                     {/* Quick Give Upad */}
                     <button
                       type="button"
                       onClick={() => setWorkerUpadTarget(row)}
-                      className="rounded-xl border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100/80 transition"
+                      className="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100/80 transition shrink-0"
                       title="Manage Upad"
                     >
                       <HandCoins className="h-3.5 w-3.5" />
+                      <span className="text-[10px] font-bold hidden sm:inline">+ Upad</span>
                     </button>
                   </div>
                 </div>
@@ -828,25 +842,37 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           </div>
         ) : (
           <>
-            {/* Cycle & Carry Forward Header Banner */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 bg-stone-50/90 px-3.5 py-2 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-stone-900">
-                  Current Cycle: {formatDateRange(cycleStart, payoutDate)}
-                </span>
-                {lastPayout && (
-                  <span className="text-[11px] text-stone-500 font-medium hidden sm:inline">
-                    · Last payout closed {formatDateShort(lastPayout)}
+            {/* Step 1 Header Banner */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-emerald-200 bg-gradient-to-r from-emerald-50 via-teal-50 to-stone-50 px-4 py-3 text-xs">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-md bg-emerald-700 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white">
+                    Step 1: Check Attendance
                   </span>
-                )}
+                  <span className="font-extrabold text-stone-900">
+                    Cycle {formatDateRange(cycleStart, payoutDate)}
+                  </span>
+                  {lastPayout && (
+                    <span className="text-[11px] text-stone-500 font-medium hidden sm:inline">
+                      · Last payout closed {formatDateShort(lastPayout)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex items-center gap-2 text-[11px] text-stone-600">
+                  <span>Verify marks below. Unmarked days are highlighted. When attendance is verified, proceed to Step 2.</span>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200/70">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                <span>Unpaid salary & remaining upad automatically carry forward</span>
-              </div>
+              <Button
+                size="sm"
+                onClick={() => onNavigate('payout')}
+                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold shrink-0 shadow-xs"
+              >
+                <span>Issue Payout (Step 2)</span>
+                <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
             </div>
 
-            <div className="table-scroll max-h-[calc(100vh-23rem)]">
+            <div className="table-scroll max-h-[calc(100vh-23rem)] pb-24">
             <table className="w-full min-w-max border-separate border-spacing-0 text-xs attendance-grid">
               <thead>
                 <tr>
@@ -856,9 +882,12 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   </th>
 
                   {/* Daily Date Columns */}
-                  {days.map((day) => {
+                  {days.map((day, dIdx) => {
                       const isToday = day === today
                       const isFri = isFriday(day)
+                      const dayTotal = dailyTotals[dIdx]
+                      // Only show OFF when 0 workers were marked on Friday (truly closed day)
+                      const isClosedDay = isFri && (!dayTotal || (dayTotal.present === 0 && dayTotal.half === 0))
                       const isBulkOpen = bulkMenuDate === day
                       return (
                         <th
@@ -867,7 +896,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                             'sticky top-0 z-10 min-w-[4.8rem] border-b border-l border-stone-200 px-1 py-1.5 text-center',
                             isToday
                               ? 'bg-emerald-50 text-emerald-950 font-bold'
-                              : isFri
+                              : isClosedDay
                                 ? 'bg-amber-50/70 text-amber-950'
                                 : 'bg-stone-50 text-stone-800',
                           )}
@@ -876,12 +905,12 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                             <span
                               className={clsx(
                                 'text-[10px] font-semibold uppercase',
-                                isToday ? 'text-emerald-700' : isFri ? 'text-amber-700' : 'text-stone-500',
+                                isToday ? 'text-emerald-700' : isClosedDay ? 'text-amber-700' : 'text-stone-500',
                               )}
                             >
                               {weekdayShort(day)}
                             </span>
-                            {isFri && (
+                            {isClosedDay && (
                               <span className="rounded bg-amber-200 px-1 text-[8px] font-bold text-amber-900">
                                 OFF
                               </span>
@@ -953,27 +982,18 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                       )
                     })}
 
-                  {/* Summary Columns */}
-                  <th className="sticky top-0 z-10 min-w-[5.2rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Working Days
+                  {/* Summary Columns for Step 1 Check Attendance */}
+                  <th className="sticky top-0 z-10 min-w-[5.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                    Days & OT
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[5.8rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Salary
+                  <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                    Owed Now
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[6rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Upad
+                  <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                    Upad Bal
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-rose-700">
-                    Recover Upad
-                  </th>
-                  <th className="sticky top-0 z-10 min-w-[17rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Summary
-                  </th>
-                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-emerald-800">
-                    Total Payable
-                  </th>
-                  <th className="sticky top-0 z-10 min-w-[8.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Save Payment
+                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-emerald-800">
+                    Action
                   </th>
                 </tr>
               </thead>
@@ -981,18 +1001,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               <tbody className="divide-y divide-stone-100">
                 {displayRows.map((row) => {
                   const { employee } = row
-                  const rowInput = entries[employee.id]
-                  const paidValue = rowInput?.paid ?? paiseToInput(row.totalDuePaise)
-
-                  let fullCount = 0
-                  let halfCount = 0
-                  let absentCount = 0
-                  for (const d of days) {
-                    const rec = attendanceMap.get(keyFor(employee.id, d))
-                    if (rec?.status === 'full') fullCount += 1
-                    else if (rec?.status === 'half') halfCount += 1
-                    else if (rec?.status === 'absent') absentCount += 1
-                  }
+                  const owedNow = row.openingPaise + row.earnedPaise + row.adjustmentPaise
 
                   return (
                     <tr
@@ -1056,6 +1065,8 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                           const hasNote = Boolean(record?.note)
                           const hasOt = record && record.ot_minutes > 0
                           const isFri = isFriday(day)
+                          const isSettled = Boolean(record?.settled_payout)
+                          const isUnmarked = !record?.status && day <= today && employee.active && (!employee.joined_on || employee.joined_on <= day)
 
                           return (
                             <td
@@ -1066,48 +1077,73 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                               )}
                             >
                               <div className="group relative">
-                                <button
-                                  type="button"
-                                  onClick={() => cycleCell(employee, day)}
-                                  onContextMenu={(event) => {
-                                    event.preventDefault()
-                                    setEditor({ employeeId: employee.id, date: day })
-                                  }}
-                                  title={`${employee.name} · ${weekdayShort(day)} ${formatDateShort(day)}\nRate: ${formatMoney(rate)}/d\nStatus: ${record ? STATUS_NAME[record.status] : 'Blank (no pay)'}`}
-                                  className={clsx(
-                                    'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold transition-all select-none',
-                                    cellStyle(record?.status),
-                                  )}
-                                >
-                                  <span className="text-xs font-bold leading-tight">
-                                    {record ? STATUS_LABEL[record.status] : '—'}
-                                  </span>
-
-                                  {/* Clean OT Pill */}
-                                  {hasOt && (
-                                    <span className="mt-0.5 inline-flex items-center rounded px-1 py-0.2 text-[9px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/80 tabular-nums leading-none">
-                                      +{formatHours(record.ot_minutes)}
+                                {isSettled ? (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    title={`Settled in payout on ${formatDateShort(day)}. Locked.`}
+                                    className={clsx(
+                                      'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold select-none opacity-80 cursor-not-allowed',
+                                      cellStyle(record?.status),
+                                    )}
+                                  >
+                                    <span className="text-xs font-bold leading-tight flex items-center gap-0.5">
+                                      {record ? STATUS_LABEL[record.status] : '—'}
+                                      <Lock className="h-2.5 w-2.5 text-stone-400" />
                                     </span>
-                                  )}
+                                    {hasOt && (
+                                      <span className="mt-0.5 inline-flex items-center rounded px-1 py-0.2 text-[9px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/80 tabular-nums leading-none">
+                                        +{formatHours(record.ot_minutes)}
+                                      </span>
+                                    )}
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => cycleCell(employee, day)}
+                                    onContextMenu={(event) => {
+                                      event.preventDefault()
+                                      setEditor({ employeeId: employee.id, date: day })
+                                    }}
+                                    title={`${employee.name} · ${weekdayShort(day)} ${formatDateShort(day)}\nRate: ${formatMoney(rate)}/d\nStatus: ${record ? STATUS_NAME[record.status] : 'Blank (no pay)'}`}
+                                    className={clsx(
+                                      'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold transition-all select-none',
+                                      cellStyle(record?.status),
+                                      isUnmarked && 'border-dashed border-amber-400/90 bg-amber-50/30',
+                                    )}
+                                  >
+                                    <span className="text-xs font-bold leading-tight">
+                                      {record ? STATUS_LABEL[record.status] : '—'}
+                                    </span>
 
-                                  {/* Note Indicator Dot */}
-                                  {hasNote && (
-                                    <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                  )}
-                                </button>
+                                    {/* Clean OT Pill */}
+                                    {hasOt && (
+                                      <span className="mt-0.5 inline-flex items-center rounded px-1 py-0.2 text-[9px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/80 tabular-nums leading-none">
+                                        +{formatHours(record.ot_minutes)}
+                                      </span>
+                                    )}
+
+                                    {/* Note Indicator Dot */}
+                                    {hasNote && (
+                                      <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                    )}
+                                  </button>
+                                )}
 
                                 {/* Hover Pencil Edit Button */}
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    setEditor({ employeeId: employee.id, date: day })
-                                  }}
-                                  className="absolute -right-1 -top-1 hidden rounded-full border border-stone-200 bg-white p-1 text-stone-500 shadow-sm hover:text-emerald-700 group-hover:block transition z-10"
-                                  aria-label={`Edit ${employee.name} on ${formatDateShort(day)}`}
-                                >
-                                  <Pencil className="h-2.5 w-2.5" />
-                                </button>
+                                {!isSettled && (
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      setEditor({ employeeId: employee.id, date: day })
+                                    }}
+                                    className="absolute -right-1 -top-1 hidden rounded-full border border-stone-200 bg-white p-1 text-stone-500 shadow-sm hover:text-emerald-700 group-hover:block transition z-10"
+                                    aria-label={`Edit ${employee.name} on ${formatDateShort(day)}`}
+                                  >
+                                    <Pencil className="h-2.5 w-2.5" />
+                                  </button>
+                                )}
                               </div>
                             </td>
                           )
@@ -1127,17 +1163,21 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         </div>
                       </td>
 
-                      {/* Salary Column */}
+                      {/* Owed Now (Salary + Carry + Adjustments) */}
                       <td className="border-b border-l border-stone-100 px-2.5 py-2 text-right">
                         <div className="text-xs font-bold text-stone-900 tabular-nums">
-                          {formatMoney(row.earnedPaise, { showZero: true })}
+                          {formatMoney(owedNow, { showZero: true })}
                         </div>
-                        {row.openingPaise > 0 && (
+                        {row.openingPaise > 0 ? (
                           <div
                             className="text-[10px] font-semibold text-sky-800 tabular-nums"
                             title="Unpaid salary carried forward from last cycle"
                           >
                             +{formatMoney(row.openingPaise)} Baki
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-stone-400 tabular-nums">
+                            {formatMoney(row.earnedPaise)} cycle
                           </div>
                         )}
                       </td>
@@ -1160,173 +1200,16 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         </button>
                       </td>
 
-                      {/* Recover Upad Column */}
-                      <td className="border-b border-l border-stone-100 px-2 py-2 text-center">
-                        {row.upadOutstandingPaise > 0 ? (
-                          <div>
-                            <div className="flex items-center justify-center gap-1">
-                              <div className="relative">
-                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-rose-600">
-                                  -₹
-                                </span>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  placeholder="0"
-                                  value={entries[employee.id]?.recovery ?? ''}
-                                  onChange={(e) => setRowInput(employee.id, { recovery: e.target.value })}
-                                  className="w-18 rounded-lg border border-stone-200 bg-white pl-5 pr-1.5 py-1 text-xs font-bold text-stone-900 tabular-nums focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                                  title={`Max recoverable from salary: ${formatMoney(Math.min(row.upadOutstandingPaise, Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise)))}`}
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const maxVal = Math.min(
-                                    row.upadOutstandingPaise,
-                                    Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise),
-                                  )
-                                  setRowInput(employee.id, { recovery: paiseToInput(maxVal) })
-                                }}
-                                className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-1 text-[10px] font-semibold text-stone-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 transition"
-                                title="Recover maximum upad from this salary"
-                              >
-                                Max
-                              </button>
-                            </div>
-                            {row.upadOutstandingPaise > (row.openingPaise + row.earnedPaise + row.adjustmentPaise) && (
-                              <div className="mt-0.5 text-[9px] font-bold text-amber-800 whitespace-nowrap">
-                                Over-adv. {formatMoney(row.upadOutstandingPaise - row.upadRecoveryPaise)} CF
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-stone-300 font-medium">—</span>
-                        )}
-                      </td>
-
-                      {/* 6. Summary Column (x | x | x | with colors & increased font size) */}
-                      <td className="border-b border-l border-stone-100 px-3 py-2 text-left">
-                        <div className="flex flex-wrap items-center gap-1.5 text-xs font-medium whitespace-nowrap leading-none py-0.5">
-                          <span className="font-bold text-stone-900">
-                            {row.daysWorked} d
-                          </span>
-                          <span className="text-stone-300 font-normal">|</span>
-                          <span className={clsx(
-                            'font-bold tabular-nums',
-                            row.otMinutes > 0 ? 'text-teal-700' : 'text-stone-400',
-                          )}>
-                            {row.otMinutes > 0 ? `+${formatHours(row.otMinutes)} OT` : '0h OT'}
-                          </span>
-                          <span className="text-stone-300 font-normal">|</span>
-                          <span className="font-bold text-emerald-800 tabular-nums">
-                            {formatMoney(row.earnedPaise, { showZero: true })} Sal
-                          </span>
-                          {row.openingPaise > 0 && (
-                            <>
-                              <span className="text-stone-300 font-normal">|</span>
-                              <span className="font-bold text-sky-800 tabular-nums">
-                                +{formatMoney(row.openingPaise)} Last Baki
-                              </span>
-                            </>
-                          )}
-                          {row.adjustmentPaise !== 0 && (
-                            <>
-                              <span className="text-stone-300 font-normal">|</span>
-                              <span className={clsx(
-                                'font-bold tabular-nums',
-                                row.adjustmentPaise > 0 ? 'text-emerald-700' : 'text-rose-700',
-                              )}>
-                                {row.adjustmentPaise > 0 ? `+${formatMoney(row.adjustmentPaise)} Bonus` : `-${formatMoney(Math.abs(row.adjustmentPaise))} Fine`}
-                              </span>
-                            </>
-                          )}
-                          <span className="text-stone-300 font-normal">|</span>
-                          <span className={clsx(
-                            'font-bold tabular-nums',
-                            row.upadOutstandingPaise > 0 ? 'text-amber-800' : 'text-stone-400',
-                          )}>
-                            {formatMoney(row.upadOutstandingPaise)} Upad
-                          </span>
-                          {row.upadRecoveryPaise > 0 && (
-                            <>
-                              <span className="text-stone-300 font-normal">|</span>
-                              <span className="font-bold text-rose-700 tabular-nums">
-                                -{formatMoney(row.upadRecoveryPaise)} Rec
-                              </span>
-                            </>
-                          )}
-                          <span className="text-stone-300 font-normal">|</span>
-                          <span className={clsx(
-                            'font-bold tabular-nums',
-                            row.upadOutstandingPaise - row.upadRecoveryPaise > 0 ? 'text-amber-900 font-semibold' : 'text-stone-500',
-                          )}>
-                            {formatMoney(Math.max(0, row.upadOutstandingPaise - row.upadRecoveryPaise))} Rem{row.upadOutstandingPaise - row.upadRecoveryPaise > 0 ? ' CF' : ''}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* 7. Total Payable Column */}
-                      <td className="border-b border-l border-stone-100 px-3 py-2 text-right">
-                        <div className="text-sm font-bold text-emerald-800 tabular-nums">
-                          {formatMoney(row.totalDuePaise, { showZero: true })}
-                        </div>
-                        <div className="mt-0.5 text-[11px] tabular-nums">
-                          {row.openingPaise > 0 ? (
-                            <span className="text-sky-800 font-medium">
-                              Sal {formatMoney(row.earnedPaise)} + Baki {formatMoney(row.openingPaise)}
-                              {row.upadRecoveryPaise > 0 ? ` - Rec ${formatMoney(row.upadRecoveryPaise)}` : ''}
-                            </span>
-                          ) : row.upadRecoveryPaise > 0 ? (
-                            <span className="text-rose-700 font-medium">
-                              Sal {formatMoney(row.earnedPaise)} - Rec {formatMoney(row.upadRecoveryPaise)}
-                            </span>
-                          ) : row.totalDuePaise === 0 && row.upadOutstandingPaise > 0 ? (
-                            <span className="text-amber-700 font-medium">
-                              {formatMoney(row.upadOutstandingPaise - row.upadRecoveryPaise)} Upad carries forward
-                            </span>
-                          ) : (
-                            <span className="text-stone-400 font-normal">Full salary payable</span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* 8. Save / Confirm Column */}
+                      {/* Pay Worker Action (Navigates to Payout Screen for this worker) */}
                       <td className="border-b border-l border-stone-100 px-3 py-2 text-center">
                         <button
                           type="button"
-                          onClick={() => setWorkerModalRow(row)}
-                          className={clsx(
-                            'inline-flex items-center justify-center gap-1.5 w-full rounded-xl px-2.5 py-1.5 text-xs font-semibold transition border select-none',
-                            row.closingPaise === 0 && row.totalDuePaise > 0
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 shadow-2xs'
-                              : row.closingPaise > 0
-                                ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 shadow-2xs'
-                                : 'border-stone-200 bg-stone-50 text-stone-600 hover:bg-stone-100',
-                          )}
-                          title={`Click to confirm & save payment for ${employee.name}`}
+                          onClick={() => onNavigate(`payout?worker=${employee.id}`)}
+                          className="inline-flex items-center justify-center gap-1 w-full rounded-xl px-2.5 py-1.5 text-xs font-bold transition border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
+                          title={`Open payout screen for ${employee.name}`}
                         >
-                          {row.closingPaise === 0 && row.totalDuePaise > 0 ? (
-                            <>
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
-                              <span className="truncate font-bold">Paid {formatMoney(row.paidPaise)}</span>
-                            </>
-                          ) : row.closingPaise > 0 ? (
-                            <>
-                              <span className="font-bold text-amber-800 truncate">
-                                Pay {formatMoney(row.paidPaise)}
-                              </span>
-                              <span className="text-[10px] text-amber-700/80 shrink-0">
-                                ({formatMoney(row.closingPaise)} Baki CF)
-                              </span>
-                            </>
-                          ) : row.upadOutstandingPaise > row.upadRecoveryPaise ? (
-                            <span className="text-amber-800 font-medium text-[11px]">
-                              Settled (₹0 · {formatMoney(row.upadOutstandingPaise - row.upadRecoveryPaise)} Upad CF)
-                            </span>
-                          ) : (
-                            <span>Settled (₹0)</span>
-                          )}
+                          <span>Pay Worker</span>
+                          <ArrowRight className="h-3 w-3" />
                         </button>
                       </td>
                     </tr>
@@ -1334,26 +1217,26 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                 })}
               </tbody>
 
-              {/* Table Footer Totals */}
+              {/* Table Footer Totals (Opaque background so text never bleeds through) */}
               <tfoot>
                 <tr className="bg-stone-100 font-bold text-stone-900 border-t border-stone-300">
-                  <td className="sticky bottom-0 left-0 z-30 border-t border-stone-300 bg-stone-100 px-3.5 py-2 text-xs uppercase tracking-wider text-stone-800 shadow-[1px_0_0_0_#cbd5e1]">
+                  <td className="sticky bottom-0 left-0 z-30 border-t border-stone-300 bg-stone-100 px-3.5 py-2.5 text-xs uppercase tracking-wider text-stone-800 shadow-[1px_0_0_0_#cbd5e1]">
                     Cycle Total ({rows.length})
                   </td>
 
                   {dailyTotals.map((total, index) => (
-                      <td
-                        key={days[index]}
-                        className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-1 py-1.5 text-center"
-                      >
-                        <div className="text-[10px] font-bold text-stone-800 tabular-nums">
-                          {total.present} P
-                        </div>
-                        <div className="text-[9px] font-semibold text-stone-500 tabular-nums">
-                          {total.ot > 0 ? `+${formatHours(total.ot)}` : '—'}
-                        </div>
-                      </td>
-                    ))}
+                    <td
+                      key={days[index]}
+                      className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-1 py-1.5 text-center"
+                    >
+                      <div className="text-[10px] font-bold text-stone-800 tabular-nums">
+                        {total.present} P
+                      </div>
+                      <div className="text-[9px] font-semibold text-stone-500 tabular-nums">
+                        {total.ot > 0 ? `+${formatHours(total.ot)}` : '—'}
+                      </div>
+                    </td>
+                  ))}
 
                   <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-2 py-2 text-center text-xs font-bold text-stone-800 tabular-nums">
                     <div>{rows.reduce((sum, r) => sum + r.daysWorked, 0)} d</div>
@@ -1365,74 +1248,20 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   </td>
 
                   <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-2.5 py-2 text-right text-xs font-bold text-stone-950 tabular-nums">
-                    {formatMoney(totals.earned, { showZero: true })}
+                    {formatMoney(totals.opening + totals.earned + totals.adjustment, { showZero: true })}
                   </td>
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-amber-50/70 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-amber-100 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
                     {totals.outstanding > 0 ? formatMoney(totals.outstanding, { showZero: true }) : '—'}
                   </td>
-                  {/* Footer Recover Upad Totals */}
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-rose-50/50 px-2 py-1.5 text-center text-xs font-bold text-rose-900 tabular-nums">
-                    -{formatMoney(totals.recovery, { showZero: true })}
-                  </td>
-                  {/* Footer 6. Summary Totals (x | x | x | with colors & increased font size) */}
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-3 py-2 text-left">
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs whitespace-nowrap leading-none">
-                      <span className="font-bold text-stone-900">
-                        {rows.reduce((sum, r) => sum + r.daysWorked, 0)} d
-                      </span>
-                      <span className="text-stone-300 font-normal">|</span>
-                      <span className="font-bold text-teal-800 tabular-nums">
-                        +{formatHours(rows.reduce((sum, r) => sum + r.otMinutes, 0))} OT
-                      </span>
-                      <span className="text-stone-300 font-normal">|</span>
-                      <span className="font-bold text-emerald-800 tabular-nums">
-                        {formatMoney(totals.earned)} Sal
-                      </span>
-                      {totals.opening > 0 && (
-                        <>
-                          <span className="text-stone-300 font-normal">|</span>
-                          <span className="font-bold text-sky-800 tabular-nums">
-                            +{formatMoney(totals.opening)} Last Baki
-                          </span>
-                        </>
-                      )}
-                      <span className="text-stone-300 font-normal">|</span>
-                      <span className="font-bold text-amber-800 tabular-nums">
-                        {formatMoney(totals.outstanding)} Upad
-                      </span>
-                      {totals.recovery > 0 && (
-                        <>
-                          <span className="text-stone-300 font-normal">|</span>
-                          <span className="font-bold text-rose-700 tabular-nums">
-                            -{formatMoney(totals.recovery)} Rec
-                          </span>
-                        </>
-                      )}
-                      <span className="text-stone-300 font-normal">|</span>
-                      <span className="font-bold text-stone-700 tabular-nums">
-                        {formatMoney(Math.max(0, totals.outstanding - totals.recovery))} Rem CF
-                      </span>
-                    </div>
-                  </td>
-                  {/* Footer 7. Total Payable Totals */}
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-emerald-50/70 px-3 py-2 text-right text-xs font-bold text-emerald-950 tabular-nums">
-                    <div>{formatMoney(totals.due, { showZero: true })}</div>
-                    <div className="text-[10px] font-medium text-emerald-800">
-                      {totals.opening > 0 ? 'Sal + Baki - Rec' : totals.recovery > 0 ? 'Sal - Rec' : 'Net Total'}
-                    </div>
-                  </td>
-                  {/* Footer 8. Save Button Totals */}
-                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-stone-100 px-2 py-1.5 text-center">
-                    <Button
-                      size="sm"
-                      variant="emerald"
-                      onClick={() => setPreviewOpen(true)}
-                      disabled={!rows.length || !validRange}
-                      className="w-full text-xs font-bold py-1"
+                  <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-emerald-100 px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('payout')}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900 hover:text-emerald-700"
                     >
-                      <Wallet className="h-3.5 w-3.5" />
-                      <span>Save All ({rows.length})</span>
-                    </Button>
+                      <span>Pay All</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </button>
                   </td>
                 </tr>
               </tfoot>
@@ -1785,6 +1614,36 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           onUpdateRecovery={(amount) => setRowInput(workerUpadTarget.employee.id, { recovery: amount })}
           currentRecovery={entries[workerUpadTarget.employee.id]?.recovery ?? ''}
         />
+      )}
+
+      {/* Confirmation Modal for Clear Today */}
+      {clearConfirmOpen && (
+        <Modal
+          open={clearConfirmOpen}
+          onClose={() => setClearConfirmOpen(false)}
+          title="Clear Today's Attendance?"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-stone-600">
+              Are you sure you want to clear attendance marks for all active workers for today (
+              <strong className="text-stone-900">{formatDateLong(today)}</strong>)? Any overtime and notes recorded for today will also be removed.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="secondary" onClick={() => setClearConfirmOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setClearConfirmOpen(false)
+                  bulkMutation.mutate({ date: today, status: null })
+                }}
+              >
+                Clear Today
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )
