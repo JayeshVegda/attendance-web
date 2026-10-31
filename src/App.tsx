@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { AppShell, type View } from './components/AppShell'
 import { ToastProvider } from './components/Toast'
 import AttendancePage from './pages/AttendancePage'
+import PayoutScreen from './pages/PayoutScreen'
 import EmployeesPage from './pages/EmployeesPage'
 import EmployeeDetailPage from './pages/EmployeeDetailPage'
 import UpadPage from './pages/UpadPage'
@@ -15,8 +16,8 @@ const VIEWS: View[] = ['attendance', 'employees', 'upad', 'reports', 'settings']
 function parseHash(): Route {
   const raw = window.location.hash.replace(/^#\/?/, '')
   const [first, second] = raw.split('/')
-  const alias = first === 'payout' ? 'attendance' : first
-  const view = (VIEWS.includes(alias as View) ? alias : 'attendance') as View
+  if (first === 'payout') return { view: 'attendance', id: 'payout' }
+  const view = (VIEWS.includes(first as View) ? first : 'attendance') as View
   return { view, id: second || undefined }
 }
 
@@ -58,6 +59,8 @@ export default function App() {
     page = <ReportsPage runId={route.id} onNavigate={navigate} />
   } else if (route.view === 'settings') {
     page = <SettingsPage />
+  } else if (route.id === 'payout') {
+    page = <PayoutScreen onNavigate={navigate} />
   } else {
     page = <AttendancePage onNavigate={navigate} />
   }

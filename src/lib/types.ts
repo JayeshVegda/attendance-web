@@ -8,7 +8,10 @@ export type Employee = {
   active: boolean
   daily_rate_paise: number
   opening_salary_paise: number
-  opening_upad_paise: number
+  opening_upad_paise?: number
+  opening_date?: string
+  opening_chalu_paise?: number
+  opening_moto_paise?: number
   joined_on: string
   notes: string
   sort_order: number
@@ -43,20 +46,25 @@ export type Attendance = {
   note: string
   created: string
   updated: string
+  settled_payout?: string
 }
+
+export type AdjustmentKind = 'bonus' | 'reimbursement' | 'deduction'
 
 export type Adjustment = {
   id: string
   employee: string
   date: string
   amount_paise: number
+  kind?: AdjustmentKind
   note: string
   created: string
+  settled_payout?: string
 }
 
 export type UpadKind = 'given' | 'recovery' | 'returned' | 'writeoff'
 
-export type UpadCategory = 'regular' | 'extra'
+export type UpadCategory = 'chalu' | 'moto' | 'regular' | 'extra'
 
 export type UpadEntry = {
   id: string
@@ -66,7 +74,9 @@ export type UpadEntry = {
   category: UpadCategory | ''
   amount_paise: number
   note: string
-  statement: string
+  statement?: string
+  payout?: string
+  voided?: boolean
   created: string
 }
 
@@ -74,12 +84,14 @@ export type PayoutRun = {
   id: string
   cycle_start: string
   payout_date: string
+  cutoff_date?: string
   status: string
   note: string
   total_due_paise: number
   total_paid_paise: number
   total_upad_recovery_paise: number
   employee_count: number
+  voided?: boolean
   created: string
 }
 
@@ -100,6 +112,7 @@ export type Statement = {
   days_worked: number
   ot_minutes: number
   note: string
+  voided?: boolean
   created: string
 }
 
@@ -110,6 +123,7 @@ export type SalaryPayment = {
   paid_on: string
   amount_paise: number
   note: string
+  voided?: boolean
   created: string
 }
 

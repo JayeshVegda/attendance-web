@@ -29,7 +29,7 @@ import {
 } from '../lib/api'
 import { addDays, formatDateLong, formatDateShort, todayKey, weekdayShort } from '../lib/dates'
 import { formatHours, formatMoney, paiseToInput, parseMoneyInput } from '../lib/money'
-import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee } from '../lib/payroll'
+import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
 import type { Employee } from '../lib/types'
 import { UpadModal } from '../components/UpadModal'
 import { useToast } from '../components/Toast'
@@ -150,7 +150,8 @@ export default function EmployeeDetailPage({
   const today = todayKey()
   const currentRate = getRateForDate(employee, rates, today)
   const salaryDue = latestStatement?.closing_paise ?? employee.opening_salary_paise ?? 0
-  const upadBalance = upadBalanceForEmployee(employee, upadEntries, today)
+  const upadBreakdown = upadBreakdownForEmployee(employee, upadEntries, today)
+  const upadBalance = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
   const totalPaid = payments.reduce((sum, payment) => sum + payment.amount_paise, 0)
   const presentDays = attendance.reduce(
     (sum, entry) => sum + (entry.status === 'full' ? 1 : entry.status === 'half' ? 0.5 : 0),
@@ -274,6 +275,9 @@ export default function EmployeeDetailPage({
               )}
             >
               {formatMoney(upadBalance, { showZero: true })}
+            </div>
+            <div className="text-[10px] font-bold text-stone-500 mt-0.5">
+              Chalu {formatMoney(upadBreakdown.chaluPaise)} · Main {formatMoney(upadBreakdown.motoPaise)}
             </div>
           </div>
           <div>
@@ -542,7 +546,9 @@ export default function EmployeeDetailPage({
                       </div>
                       <div className="mt-1 text-xs text-stone-400">
                         {formatDateShort(entry.date)} ·{' '}
-                        {entry.category === 'extra' ? 'Extra' : 'Regular'}
+                        <span className="font-semibold text-stone-600">
+                          {entry.category === 'extra' || entry.category === 'moto' ? 'Main Upad' : 'Chalu Upad'}
+                        </span>
                         {entry.note ? ` · ${entry.note}` : ''}
                       </div>
                     </div>
@@ -668,7 +674,7 @@ export default function EmployeeDetailPage({
                 Opening Salary Due: <span className="font-bold text-stone-800">{formatMoney(employee.opening_salary_paise)}</span>
               </div>
               <div>
-                Opening Upad Owed: <span className="font-bold text-stone-800">{formatMoney(employee.opening_upad_paise)}</span>
+                Opening Upad Owed: <span className="font-bold text-stone-800">{formatMoney(employee.opening_upad_paise ?? 0)}</span>
               </div>
             </div>
           </Card>
@@ -743,7 +749,7 @@ function EditEmployeeModal({
   const [employeeNo, setEmployeeNo] = useState(employee.employee_no)
   const [phone, setPhone] = useState(employee.phone)
   const [openingSalary, setOpeningSalary] = useState(paiseToInput(employee.opening_salary_paise))
-  const [openingUpad, setOpeningUpad] = useState(paiseToInput(employee.opening_upad_paise))
+  const [openingUpad, setOpeningUpad] = useState(paiseToInput(employee.opening_upad_paise ?? 0))
   const [notes, setNotes] = useState(employee.notes)
   const toast = useToast()
 

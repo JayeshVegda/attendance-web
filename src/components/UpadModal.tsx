@@ -23,7 +23,7 @@ export function UpadModal({
   employees,
   defaultEmployeeId,
   defaultKind = 'given',
-  defaultCategory = 'regular',
+  defaultCategory = 'chalu',
 }: {
   open: boolean
   onClose: () => void
@@ -147,13 +147,13 @@ export function UpadModal({
             </Select>
           </Field>
 
-          <Field label="Category" hint="Regular = recurring weekly advance. Extra = one-time.">
+          <Field label="Upad Bucket" hint="Chalu Upad = small running advances. Main Upad = large advances.">
             <Select
-              value={category}
+              value={category === 'regular' ? 'chalu' : category === 'extra' ? 'moto' : category}
               onChange={(event) => setCategory(event.target.value as UpadCategory)}
             >
-              <option value="regular">Regular Upad (Weekly)</option>
-              <option value="extra">Extra Upad (One-time)</option>
+              <option value="chalu">Chalu Upad (Small advance)</option>
+              <option value="moto">Main Upad (Large advance)</option>
             </Select>
           </Field>
 

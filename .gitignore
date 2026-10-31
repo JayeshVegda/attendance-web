@@ -1,6 +1,7 @@
 node_modules/
 dist/
 pb/pb_data/
+pb/pb_data*/
 pb/pb_public/
 pb/pocketbase.zip
 pb/pocketbase.exe

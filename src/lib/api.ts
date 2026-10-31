@@ -127,11 +127,16 @@ export async function createEmployee(input: {
   ratePaise: number
   openingSalaryPaise?: number
   openingUpadPaise?: number
+  openingChaluPaise?: number
+  openingMotoPaise?: number
+  openingDate?: string
   joinedOn?: string
   notes?: string
 }): Promise<Employee> {
   const employeeNo = input.employeeNo?.trim() || (await nextEmployeeNo())
   const employees = await listEmployees(true)
+  const chalu = input.openingChaluPaise ?? input.openingUpadPaise ?? 0
+  const moto = input.openingMotoPaise ?? 0
   const employee = await pb.collection(COLLECTIONS.employees).create<Employee>({
     employee_no: employeeNo,
     name: input.name.trim(),
@@ -139,7 +144,10 @@ export async function createEmployee(input: {
     active: true,
     daily_rate_paise: input.ratePaise,
     opening_salary_paise: input.openingSalaryPaise ?? 0,
-    opening_upad_paise: input.openingUpadPaise ?? 0,
+    opening_upad_paise: chalu + moto,
+    opening_chalu_paise: chalu,
+    opening_moto_paise: moto,
+    opening_date: input.openingDate || input.joinedOn || todayKey(),
     joined_on: input.joinedOn || todayKey(),
     notes: input.notes?.trim() || '',
     sort_order: employees.length + 1,

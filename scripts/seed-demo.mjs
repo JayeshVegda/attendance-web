@@ -228,6 +228,9 @@ for (const spec of employeeSpecs) {
     daily_rate_paise: spec.rate,
     opening_salary_paise: spec.openingSalary,
     opening_upad_paise: spec.openingUpad,
+    opening_chalu_paise: spec.openingChalu ?? spec.openingUpad ?? 0,
+    opening_moto_paise: spec.openingMoto ?? 0,
+    opening_date: spec.openingDate || '2026-09-30',
     joined_on: iso(spec.joined),
     notes: spec.note,
     sort_order: Number(spec.employee_no),
@@ -507,30 +510,33 @@ for (const [key, date, amount, note] of adjustments) {
 
 const upadRows = []
 
-async function addUpad(key, date, kind, amount, note, category = 'regular', statement = '') {
+async function addUpad(key, date, kind, amount, note, category = 'chalu', statement = '') {
+  const bucket = category === 'extra' || category === 'moto' ? 'moto' : 'chalu'
   const entry = await pb.collection('upad_entries').create({
     employee: people.get(key).id,
     date: iso(date),
     kind,
-    category,
+    category: bucket,
+    bucket,
     amount_paise: amount,
     note,
     statement,
+    voided: false,
   })
-  upadRows.push(entry)
+  upadRows.push({ ...entry, bucket, category: bucket })
   return entry
 }
 
-await addUpad('suresh', '2026-10-02', 'given', 30000, 'Medicine advance', 'regular')
-await addUpad('nilesh', '2026-10-03', 'given', 50000, 'Festival advance', 'regular')
-await addUpad('prakash', '2026-10-05', 'given', 40000, 'Travel advance', 'regular')
-await addUpad('kiran', '2026-10-06', 'given', 20000, 'Small advance', 'regular')
-await addUpad('vijay', '2026-10-10', 'given', 30000, 'Festival advance', 'regular')
-await addUpad('suresh', '2026-10-14', 'writeoff', 20000, 'Small balance written off', 'regular')
-await addUpad('vijay', '2026-10-18', 'given', 50000, 'Family emergency', 'extra')
-await addUpad('kiran', '2026-10-19', 'given', 30000, 'Advance', 'extra')
-await addUpad('mahesh', '2026-10-20', 'given', 20000, 'Advance', 'regular')
-await addUpad('rekhaben', '2026-10-21', 'given', 10000, 'Advance', 'regular')
+await addUpad('suresh', '2026-10-02', 'given', 30000, 'Medicine advance', 'chalu')
+await addUpad('nilesh', '2026-10-03', 'given', 50000, 'Festival advance', 'chalu')
+await addUpad('prakash', '2026-10-05', 'given', 40000, 'Travel advance', 'chalu')
+await addUpad('kiran', '2026-10-06', 'given', 20000, 'Small advance', 'chalu')
+await addUpad('vijay', '2026-10-10', 'given', 30000, 'Festival advance', 'chalu')
+await addUpad('suresh', '2026-10-14', 'writeoff', 20000, 'Small balance written off', 'chalu')
+await addUpad('vijay', '2026-10-18', 'given', 50000, 'Family emergency', 'moto')
+await addUpad('kiran', '2026-10-19', 'given', 30000, 'Advance', 'moto')
+await addUpad('mahesh', '2026-10-20', 'given', 20000, 'Advance', 'chalu')
+await addUpad('rekhaben', '2026-10-21', 'given', 10000, 'Advance', 'chalu')
 
 function rateForDate(employee, date) {
   const rows = rateRows
@@ -545,8 +551,8 @@ function paidForStatus(status, rate, ot) {
 }
 
 function upadBreakdown(employee, throughDate) {
-  let regular = employee.opening_upad_paise || 0
-  let extra = 0
+  let chalu = employee.opening_chalu_paise ?? employee.opening_upad_paise ?? 0
+  let moto = employee.opening_moto_paise ?? 0
   for (const entry of upadRows) {
     if (entry.employee !== employee.id || day(entry.date) > throughDate) continue
     const amount = Math.abs(entry.amount_paise || 0)
@@ -556,20 +562,13 @@ function upadBreakdown(employee, throughDate) {
         : entry.kind === 'recovery' || entry.kind === 'returned' || entry.kind === 'writeoff'
           ? -amount
           : 0
-    if (entry.category === 'extra') extra += delta
-    else regular += delta
+    if (entry.bucket === 'moto' || entry.category === 'extra' || entry.category === 'moto') moto += delta
+    else chalu += delta
   }
-  if (regular < 0) {
-    extra += regular
-    regular = 0
-  }
-  if (extra < 0) {
-    regular += extra
-    extra = 0
-  }
-  regular = Math.max(0, Math.round(regular))
-  extra = Math.max(0, Math.round(extra))
-  return { regular, extra, total: regular + extra }
+  // Spec: Buckets NEVER auto-shift between Chalu and Moto!
+  chalu = Math.max(0, Math.round(chalu))
+  moto = Math.max(0, Math.round(moto))
+  return { chalu, moto, regular: chalu, extra: moto, total: chalu + moto }
 }
 
 const latestClosing = new Map()
@@ -604,13 +603,17 @@ function computeRows(start, end, inputs) {
     const upad = upadBreakdown(employee, end)
     const input = inputs[spec.key] || {}
     const beforeRecovery = opening + earned + adjustment
-    const recovery = Math.min(
-      input.recovery || 0,
-      upad.total,
+    const chaluRecovery = Math.min(
+      input.chaluRecovery ?? input.recovery ?? 0,
+      upad.chalu,
       Math.max(0, beforeRecovery),
     )
-    const regularRecovery = Math.min(recovery, upad.regular)
-    const extraRecovery = recovery - regularRecovery
+    const motoRecovery = Math.min(
+      input.motoRecovery ?? 0,
+      upad.moto,
+      Math.max(0, beforeRecovery - chaluRecovery),
+    )
+    const recovery = chaluRecovery + motoRecovery
     const due = Math.max(0, beforeRecovery - recovery)
     const paid = Math.max(0, Math.min(input.paid ?? due, due))
     const closing = due - paid
@@ -621,11 +624,15 @@ function computeRows(start, end, inputs) {
       earned,
       adjustment,
       upadOutstanding: upad.total,
-      regularOutstanding: upad.regular,
-      extraOutstanding: upad.extra,
+      chaluOutstanding: upad.chalu,
+      motoOutstanding: upad.moto,
+      regularOutstanding: upad.chalu,
+      extraOutstanding: upad.moto,
       recovery,
-      regularRecovery,
-      extraRecovery,
+      chaluRecovery,
+      motoRecovery,
+      regularRecovery: chaluRecovery,
+      extraRecovery: motoRecovery,
       due,
       paid,
       closing,
@@ -646,12 +653,14 @@ async function seedPayout({ start, end, inputs, note }) {
   const run = await pb.collection('payout_runs').create({
     cycle_start: iso(start),
     payout_date: iso(end),
+    cutoff_date: iso(end),
     status: 'closed',
     note,
     total_due_paise: totalDue,
     total_paid_paise: totalPaid,
     total_upad_recovery_paise: totalRecovery,
     employee_count: rows.length,
+    voided: false,
   })
 
   for (const row of rows) {
@@ -671,6 +680,7 @@ async function seedPayout({ start, end, inputs, note }) {
       days_worked: row.daysWorked,
       ot_minutes: row.otMinutes,
       note: row.note,
+      voided: false,
     })
 
     if (row.paid > 0) {
@@ -680,29 +690,41 @@ async function seedPayout({ start, end, inputs, note }) {
         paid_on: iso(end),
         amount_paise: row.paid,
         note: 'Demo payout',
+        voided: false,
       })
     }
 
-    if (row.recovery > 0) {
-      const parts = [
-        { category: 'regular', amount: row.regularRecovery },
-        { category: 'extra', amount: row.extraRecovery },
-      ]
-      for (const part of parts) {
-        if (part.amount <= 0) continue
-        await addUpad(
-          employeeKey(row.employee.id),
-          end,
-          'recovery',
-          part.amount,
-          'Recovered in payout',
-          part.category,
-          statement.id,
-        )
-      }
+    if (row.chaluRecovery > 0) {
+      await addUpad(
+        employeeKey(row.employee.id),
+        end,
+        'recovery',
+        row.chaluRecovery,
+        'Recovered in payout (Chalu)',
+        'chalu',
+        statement.id,
+      )
+    }
+    if (row.motoRecovery > 0) {
+      await addUpad(
+        employeeKey(row.employee.id),
+        end,
+        'recovery',
+        row.motoRecovery,
+        'Recovered in payout (Main)',
+        'moto',
+        statement.id,
+      )
     }
 
     latestClosing.set(row.employee.id, row.closing)
+  }
+
+  // Mark settled_payout on settled attendance rows
+  for (const record of attendanceRows) {
+    if (day(record.date) >= start && day(record.date) <= end) {
+      await pb.collection('attendance').update(record.id, { settled_payout: run.id }).catch(() => {})
+    }
   }
 
   return run
@@ -721,10 +743,10 @@ const runOne = await seedPayout({
   note: 'Opening cycle with partial payments and upad recovery',
   inputs: {
     kiran: { paid: 50000, note: '₹500 carried forward' },
-    vijay: { recovery: 50000 },
+    vijay: { chaluRecovery: 50000 },
     prakash: { paid: 0, note: 'Unpaid salary carried forward' },
     nilesh: { paid: 150000, note: 'Partial payment' },
-    bharat: { recovery: 50000 },
+    bharat: { chaluRecovery: 50000 },
   },
 })
 
@@ -733,11 +755,11 @@ const runTwo = await seedPayout({
   end: '2026-10-15',
   note: 'Second cycle with bonus, write-off and a large carry',
   inputs: {
-    kiran: { recovery: 20000 },
-    vijay: { recovery: 20000 },
+    kiran: { chaluRecovery: 20000 },
+    vijay: { chaluRecovery: 20000 },
     prakash: { paid: 250000, note: 'Part payment' },
     nilesh: { paid: 0, note: 'Unpaid salary carried forward' },
-    bharat: { recovery: 50000 },
+    bharat: { chaluRecovery: 50000 },
   },
 })
 
@@ -746,8 +768,8 @@ await addUpad(
   '2026-10-22',
   'returned',
   10000,
-  'Returned part of the extra upad in cash',
-  'extra',
+  'Returned part of the Main upad in cash',
+  'moto',
 )
 
 await pb.collection('audit_log').create({

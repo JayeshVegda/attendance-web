@@ -60,9 +60,9 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
         const breakdown = upadBreakdownForEmployee(employee, entries, today)
         return {
           employee,
-          balance: breakdown.regularPaise + breakdown.extraPaise,
-          regular: breakdown.regularPaise,
-          extra: breakdown.extraPaise,
+          balance: breakdown.chaluPaise + breakdown.motoPaise,
+          chalu: breakdown.chaluPaise,
+          moto: breakdown.motoPaise,
           lastEntry: entries
             .filter((entry) => entry.employee === employee.id)
             .sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)))[0],
@@ -212,7 +212,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
           </div>
         ) : (
           <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-            {balances.map(({ employee, balance, regular, extra, lastEntry }) => (
+            {balances.map(({ employee, balance, chalu, moto, lastEntry }) => (
               <div
                 key={employee.id}
                 className="group flex flex-col justify-between rounded-2xl border border-stone-200 bg-white p-3.5 shadow-xs transition hover:border-amber-300 hover:shadow-md"
@@ -240,8 +240,8 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                       <div className="text-base font-black text-rose-600 tabular-nums">
                         {formatMoney(balance)}
                       </div>
-                      <div className="text-[10px] font-bold text-stone-400">
-                        R {formatMoney(regular)} · E {formatMoney(extra)}
+                      <div className="text-[10px] font-bold text-stone-500">
+                        Chalu {formatMoney(chalu)} · Main {formatMoney(moto)}
                       </div>
                     </div>
                   </div>
@@ -309,7 +309,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                 <tr>
                   <th className="px-4 py-2.5">Date</th>
                   <th className="px-4 py-2.5">Employee</th>
-                  <th className="px-4 py-2.5">Type & Category</th>
+                  <th className="px-4 py-2.5">Type & Bucket</th>
                   <th className="px-4 py-2.5 text-right">Amount</th>
                   <th className="px-4 py-2.5">Note</th>
                   <th className="px-4 py-2.5">Source</th>
@@ -358,8 +358,8 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                           >
                             {KIND_LABEL[entry.kind]}
                           </Badge>
-                          <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-600">
-                            {entry.category === 'extra' ? 'Extra' : 'Regular'}
+                          <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-700">
+                            {entry.category === 'extra' || entry.category === 'moto' ? 'Main Upad' : 'Chalu Upad'}
                           </span>
                         </div>
                       </td>

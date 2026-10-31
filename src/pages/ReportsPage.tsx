@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   BarChart3,
   CalendarCheck,
@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   FileText,
   Printer,
+  Undo2,
   Users,
   Wallet,
 } from 'lucide-react'
@@ -22,6 +23,9 @@ import {
 import { dateKey, formatDateLong, formatDateRange, monthLabel, monthKey } from '../lib/dates'
 import { formatHours, formatMoney } from '../lib/money'
 import { latestStatementByEmployee, upadBalanceForEmployee } from '../lib/payroll'
+import { useToast } from '../components/Toast'
+import { undoPayout } from '../lib/payout-service'
+import { ConfirmDialog } from '../components/ui'
 import type { Employee, PayoutRun, Statement } from '../lib/types'
 import {
   Avatar,
@@ -42,12 +46,29 @@ export default function ReportsPage({
   onNavigate: (path: string) => void
 }) {
   const [selectedId, setSelectedId] = useState(runId || '')
+  const [undoOpen, setUndoOpen] = useState(false)
 
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: listRuns })
   const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const toast = useToast()
+  const queryClient = useQueryClient()
+
+  const undoMutation = useMutation({
+    mutationFn: () => undoPayout(selectedRun.id),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries()
+      setUndoOpen(false)
+      if (res.ok) toast('Payout undone — statements, payments and upad entries reversed.')
+      else toast(`Cannot undo: newer payout already exists for ${res.workers.join(', ')}.`, 'error')
+    },
+    onError: () => {
+      setUndoOpen(false)
+      toast('Undo failed — nothing was changed.', 'error')
+    },
+  })
 
   const runs = useMemo(
     () =>
@@ -233,8 +254,9 @@ export default function ReportsPage({
                       )}
                     >
                       <div>
-                        <div className="text-sm font-extrabold text-stone-900">
+                        <div className="flex items-center gap-2 text-sm font-extrabold text-stone-900">
                           {formatDateLong(run.payout_date)}
+                          {run.voided && <Badge tone="red">undone</Badge>}
                         </div>
                         <div className="mt-0.5 text-xs text-stone-400">
                           {run.employee_count} workers · {formatDateRange(run.cycle_start, run.payout_date)}
@@ -330,6 +352,14 @@ export default function ReportsPage({
                     <Printer className="h-4 w-4" />
                     <span>Print Sheet</span>
                   </Button>
+                  {selectedRun.voided ? (
+                    <Badge tone="red">Voided &mdash; records restored</Badge>
+                  ) : (
+                    <Button variant="danger" size="sm" loading={undoMutation.isPending} onClick={() => setUndoOpen(true)}>
+                      <Undo2 className="h-4 w-4" />
+                      Undo Payout
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -518,12 +548,26 @@ export default function ReportsPage({
               </div>
 
               <div className="border-t border-stone-200 px-6 py-3 text-xs text-stone-400 no-print">
-                Calculation: Opening + Earned + Adjustments − Upad Recovery = Total Due. Total Due − Paid = Carried Forward.
+                Calculation: Opening + Earned + Adjustments - Upad Recovery = Total Due. Total Due - Paid = Carried Forward.
               </div>
             </Card>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={undoOpen}
+        onClose={() => setUndoOpen(false)}
+        onConfirm={() => undoMutation.mutate()}
+        title="Undo this payout?"
+        message={`This voids the payout of ${formatDateLong(selectedRun?.payout_date || '')} and restores:
+- Statements and salary payments as voided
+- Upad recovery/return entries removed
+- Attendance and adjustments for the cutoff un-settled
+- Carry reverted to the previous payout`}
+        confirmLabel="Undo Payout"
+        loading={undoMutation.isPending}
+      />
     </div>
   )
 }

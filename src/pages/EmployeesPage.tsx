@@ -369,7 +369,8 @@ function AddEmployeeModal({
   const [rate, setRate] = useState('450')
   const [joinedOn, setJoinedOn] = useState(todayKey())
   const [openingSalary, setOpeningSalary] = useState('')
-  const [openingUpad, setOpeningUpad] = useState('')
+  const [openingChalu, setOpeningChalu] = useState('')
+  const [openingMoto, setOpeningMoto] = useState('')
   const [notes, setNotes] = useState('')
   const [error, setError] = useState('')
   const toast = useToast()
@@ -383,7 +384,9 @@ function AddEmployeeModal({
         ratePaise: parseMoneyInput(rate),
         joinedOn,
         openingSalaryPaise: parseMoneyInput(openingSalary),
-        openingUpadPaise: parseMoneyInput(openingUpad),
+        openingChaluPaise: parseMoneyInput(openingChalu),
+        openingMotoPaise: parseMoneyInput(openingMoto),
+        openingDate: joinedOn,
         notes,
       }),
     onSuccess: (employee) => {
@@ -394,7 +397,8 @@ function AddEmployeeModal({
       setRate('450')
       setJoinedOn(todayKey())
       setOpeningSalary('')
-      setOpeningUpad('')
+      setOpeningChalu('')
+      setOpeningMoto('')
       setNotes('')
       onCreated(employee.id)
     },
@@ -473,11 +477,19 @@ function AddEmployeeModal({
               placeholder="0"
             />
           </Field>
-          <Field label="Opening Upad Balance (₹)" hint="Existing advance owed by worker.">
+          <Field label="Opening Chalu Upad (₹)" hint="Small running advance owed.">
             <Input
               inputMode="decimal"
-              value={openingUpad}
-              onChange={(event) => setOpeningUpad(event.target.value)}
+              value={openingChalu}
+              onChange={(event) => setOpeningChalu(event.target.value)}
+              placeholder="0"
+            />
+          </Field>
+          <Field label="Opening Main Upad (₹)" hint="Large/long-term advance owed.">
+            <Input
+              inputMode="decimal"
+              value={openingMoto}
+              onChange={(event) => setOpeningMoto(event.target.value)}
               placeholder="0"
             />
           </Field>

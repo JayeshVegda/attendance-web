@@ -66,16 +66,16 @@ export function latestStatementByEmployee(statements: Statement[]): Map<string, 
 }
 
 export function upadCategoryOf(entry: UpadEntry): UpadCategory {
-  return entry.category === 'extra' ? 'extra' : 'regular'
+  return entry.category === 'extra' || entry.category === 'moto' ? 'moto' : 'chalu'
 }
 
 export function upadBreakdownForEmployee(
   employee: Employee,
   entries: UpadEntry[],
   throughDate?: string,
-): { regularPaise: number; extraPaise: number } {
-  let regular = Math.max(0, employee.opening_upad_paise || 0)
-  let extra = 0
+): { regularPaise: number; extraPaise: number; chaluPaise: number; motoPaise: number } {
+  let chalu = Math.max(0, employee.opening_chalu_paise ?? employee.opening_upad_paise ?? 0)
+  let moto = Math.max(0, employee.opening_moto_paise ?? 0)
 
   for (const entry of entries) {
     if (entry.employee !== employee.id) continue
@@ -87,22 +87,19 @@ export function upadBreakdownForEmployee(
         : entry.kind === 'recovery' || entry.kind === 'returned' || entry.kind === 'writeoff'
           ? -amount
           : 0
-    if (upadCategoryOf(entry) === 'extra') extra += delta
-    else regular += delta
+    if (entry.category === 'extra' || entry.category === 'moto') moto += delta
+    else chalu += delta
   }
 
-  if (regular < 0) {
-    extra += regular
-    regular = 0
-  }
-  if (extra < 0) {
-    regular += extra
-    extra = 0
-  }
+  // Strictly no auto-shifting between buckets per spec Gap 2
+  chalu = Math.max(0, Math.round(chalu))
+  moto = Math.max(0, Math.round(moto))
 
   return {
-    regularPaise: Math.max(0, Math.round(regular)),
-    extraPaise: Math.max(0, Math.round(extra)),
+    chaluPaise: chalu,
+    motoPaise: moto,
+    regularPaise: chalu,
+    extraPaise: moto,
   }
 }
 

@@ -158,7 +158,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const [workerUpadTarget, setWorkerUpadTarget] = useState<CycleRow | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [note, setNote] = useState('')
-  const [viewMode, setViewMode] = useState<ViewMode>('cycle')
+  const [viewMode, setViewMode] = useState<ViewMode>('today')
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'active' | 'unmarkedToday'>('all')
   const [bulkMenuDate, setBulkMenuDate] = useState<string | null>(null)
@@ -531,8 +531,8 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               value={viewMode}
               onChange={(mode) => setViewMode(mode as ViewMode)}
               options={[
-                { id: 'cycle', label: 'Cycle Register', icon: <CalendarDays className="h-3.5 w-3.5" /> },
                 { id: 'today', label: "Today's Roll Call", icon: <CalendarCheck className="h-3.5 w-3.5" /> },
+                { id: 'cycle', label: 'Cycle Register', icon: <CalendarDays className="h-3.5 w-3.5" /> },
               ]}
             />
 
@@ -827,7 +827,26 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             })}
           </div>
         ) : (
-          <div className="table-scroll max-h-[calc(100vh-23rem)]">
+          <>
+            {/* Cycle & Carry Forward Header Banner */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 bg-stone-50/90 px-3.5 py-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-stone-900">
+                  Current Cycle: {formatDateRange(cycleStart, payoutDate)}
+                </span>
+                {lastPayout && (
+                  <span className="text-[11px] text-stone-500 font-medium hidden sm:inline">
+                    · Last payout closed {formatDateShort(lastPayout)}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200/70">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <span>Unpaid salary & remaining upad automatically carry forward</span>
+              </div>
+            </div>
+
+            <div className="table-scroll max-h-[calc(100vh-23rem)]">
             <table className="w-full min-w-max border-separate border-spacing-0 text-xs attendance-grid">
               <thead>
                 <tr>
@@ -1113,9 +1132,12 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         <div className="text-xs font-bold text-stone-900 tabular-nums">
                           {formatMoney(row.earnedPaise, { showZero: true })}
                         </div>
-                        {row.openingPaise !== 0 && (
-                          <div className="text-[10px] font-medium text-stone-400 tabular-nums">
-                            Baki: {formatMoney(row.openingPaise)}
+                        {row.openingPaise > 0 && (
+                          <div
+                            className="text-[10px] font-semibold text-sky-800 tabular-nums"
+                            title="Unpaid salary carried forward from last cycle"
+                          >
+                            +{formatMoney(row.openingPaise)} Baki
                           </div>
                         )}
                       </td>
@@ -1141,35 +1163,42 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                       {/* Recover Upad Column */}
                       <td className="border-b border-l border-stone-100 px-2 py-2 text-center">
                         {row.upadOutstandingPaise > 0 ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <div className="relative">
-                              <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-rose-600">
-                                -₹
-                              </span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="0"
-                                value={entries[employee.id]?.recovery ?? ''}
-                                onChange={(e) => setRowInput(employee.id, { recovery: e.target.value })}
-                                className="w-18 rounded-lg border border-stone-200 bg-white pl-5 pr-1.5 py-1 text-xs font-bold text-stone-900 tabular-nums focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                                title={`Max recoverable from salary: ${formatMoney(Math.min(row.upadOutstandingPaise, Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise)))}`}
-                              />
+                          <div>
+                            <div className="flex items-center justify-center gap-1">
+                              <div className="relative">
+                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-rose-600">
+                                  -₹
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder="0"
+                                  value={entries[employee.id]?.recovery ?? ''}
+                                  onChange={(e) => setRowInput(employee.id, { recovery: e.target.value })}
+                                  className="w-18 rounded-lg border border-stone-200 bg-white pl-5 pr-1.5 py-1 text-xs font-bold text-stone-900 tabular-nums focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                                  title={`Max recoverable from salary: ${formatMoney(Math.min(row.upadOutstandingPaise, Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise)))}`}
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const maxVal = Math.min(
+                                    row.upadOutstandingPaise,
+                                    Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise),
+                                  )
+                                  setRowInput(employee.id, { recovery: paiseToInput(maxVal) })
+                                }}
+                                className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-1 text-[10px] font-semibold text-stone-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 transition"
+                                title="Recover maximum upad from this salary"
+                              >
+                                Max
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const maxVal = Math.min(
-                                  row.upadOutstandingPaise,
-                                  Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise),
-                                )
-                                setRowInput(employee.id, { recovery: paiseToInput(maxVal) })
-                              }}
-                              className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-1 text-[10px] font-semibold text-stone-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 transition"
-                              title="Recover full upad from this salary"
-                            >
-                              Max
-                            </button>
+                            {row.upadOutstandingPaise > (row.openingPaise + row.earnedPaise + row.adjustmentPaise) && (
+                              <div className="mt-0.5 text-[9px] font-bold text-amber-800 whitespace-nowrap">
+                                Over-adv. {formatMoney(row.upadOutstandingPaise - row.upadRecoveryPaise)} CF
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <span className="text-xs text-stone-300 font-medium">—</span>
@@ -1193,6 +1222,25 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                           <span className="font-bold text-emerald-800 tabular-nums">
                             {formatMoney(row.earnedPaise, { showZero: true })} Sal
                           </span>
+                          {row.openingPaise > 0 && (
+                            <>
+                              <span className="text-stone-300 font-normal">|</span>
+                              <span className="font-bold text-sky-800 tabular-nums">
+                                +{formatMoney(row.openingPaise)} Last Baki
+                              </span>
+                            </>
+                          )}
+                          {row.adjustmentPaise !== 0 && (
+                            <>
+                              <span className="text-stone-300 font-normal">|</span>
+                              <span className={clsx(
+                                'font-bold tabular-nums',
+                                row.adjustmentPaise > 0 ? 'text-emerald-700' : 'text-rose-700',
+                              )}>
+                                {row.adjustmentPaise > 0 ? `+${formatMoney(row.adjustmentPaise)} Bonus` : `-${formatMoney(Math.abs(row.adjustmentPaise))} Fine`}
+                              </span>
+                            </>
+                          )}
                           <span className="text-stone-300 font-normal">|</span>
                           <span className={clsx(
                             'font-bold tabular-nums',
@@ -1209,17 +1257,12 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                             </>
                           )}
                           <span className="text-stone-300 font-normal">|</span>
-                          <span className="font-bold text-stone-600 tabular-nums">
-                            {formatMoney(Math.max(0, row.upadOutstandingPaise - row.upadRecoveryPaise))} Rem
+                          <span className={clsx(
+                            'font-bold tabular-nums',
+                            row.upadOutstandingPaise - row.upadRecoveryPaise > 0 ? 'text-amber-900 font-semibold' : 'text-stone-500',
+                          )}>
+                            {formatMoney(Math.max(0, row.upadOutstandingPaise - row.upadRecoveryPaise))} Rem{row.upadOutstandingPaise - row.upadRecoveryPaise > 0 ? ' CF' : ''}
                           </span>
-                          {row.openingPaise > 0 && (
-                            <>
-                              <span className="text-stone-300 font-normal">|</span>
-                              <span className="font-bold text-sky-800 tabular-nums">
-                                +{formatMoney(row.openingPaise)} Baki
-                              </span>
-                            </>
-                          )}
                         </div>
                       </td>
 
@@ -1228,13 +1271,22 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         <div className="text-sm font-bold text-emerald-800 tabular-nums">
                           {formatMoney(row.totalDuePaise, { showZero: true })}
                         </div>
-                        <div className="mt-0.5 text-[11px] text-stone-500 tabular-nums">
-                          {row.upadRecoveryPaise > 0 ? (
+                        <div className="mt-0.5 text-[11px] tabular-nums">
+                          {row.openingPaise > 0 ? (
+                            <span className="text-sky-800 font-medium">
+                              Sal {formatMoney(row.earnedPaise)} + Baki {formatMoney(row.openingPaise)}
+                              {row.upadRecoveryPaise > 0 ? ` - Rec ${formatMoney(row.upadRecoveryPaise)}` : ''}
+                            </span>
+                          ) : row.upadRecoveryPaise > 0 ? (
                             <span className="text-rose-700 font-medium">
-                              (Sal - {formatMoney(row.upadRecoveryPaise)})
+                              Sal {formatMoney(row.earnedPaise)} - Rec {formatMoney(row.upadRecoveryPaise)}
+                            </span>
+                          ) : row.totalDuePaise === 0 && row.upadOutstandingPaise > 0 ? (
+                            <span className="text-amber-700 font-medium">
+                              {formatMoney(row.upadOutstandingPaise - row.upadRecoveryPaise)} Upad carries forward
                             </span>
                           ) : (
-                            <span className="text-stone-400 font-normal">No deduction</span>
+                            <span className="text-stone-400 font-normal">Full salary payable</span>
                           )}
                         </div>
                       </td>
@@ -1265,9 +1317,13 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                                 Pay {formatMoney(row.paidPaise)}
                               </span>
                               <span className="text-[10px] text-amber-700/80 shrink-0">
-                                ({formatMoney(row.closingPaise)} rem)
+                                ({formatMoney(row.closingPaise)} Baki CF)
                               </span>
                             </>
+                          ) : row.upadOutstandingPaise > row.upadRecoveryPaise ? (
+                            <span className="text-amber-800 font-medium text-[11px]">
+                              Settled (₹0 · {formatMoney(row.upadOutstandingPaise - row.upadRecoveryPaise)} Upad CF)
+                            </span>
                           ) : (
                             <span>Settled (₹0)</span>
                           )}
@@ -1332,17 +1388,29 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                       <span className="font-bold text-emerald-800 tabular-nums">
                         {formatMoney(totals.earned)} Sal
                       </span>
+                      {totals.opening > 0 && (
+                        <>
+                          <span className="text-stone-300 font-normal">|</span>
+                          <span className="font-bold text-sky-800 tabular-nums">
+                            +{formatMoney(totals.opening)} Last Baki
+                          </span>
+                        </>
+                      )}
                       <span className="text-stone-300 font-normal">|</span>
                       <span className="font-bold text-amber-800 tabular-nums">
                         {formatMoney(totals.outstanding)} Upad
                       </span>
-                      <span className="text-stone-300 font-normal">|</span>
-                      <span className="font-bold text-rose-700 tabular-nums">
-                        -{formatMoney(totals.recovery)} Rec
-                      </span>
+                      {totals.recovery > 0 && (
+                        <>
+                          <span className="text-stone-300 font-normal">|</span>
+                          <span className="font-bold text-rose-700 tabular-nums">
+                            -{formatMoney(totals.recovery)} Rec
+                          </span>
+                        </>
+                      )}
                       <span className="text-stone-300 font-normal">|</span>
                       <span className="font-bold text-stone-700 tabular-nums">
-                        {formatMoney(Math.max(0, totals.outstanding - totals.recovery))} Rem
+                        {formatMoney(Math.max(0, totals.outstanding - totals.recovery))} Rem CF
                       </span>
                     </div>
                   </td>
@@ -1350,7 +1418,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   <td className="sticky bottom-0 z-10 border-l border-t border-stone-300 bg-emerald-50/70 px-3 py-2 text-right text-xs font-bold text-emerald-950 tabular-nums">
                     <div>{formatMoney(totals.due, { showZero: true })}</div>
                     <div className="text-[10px] font-medium text-emerald-800">
-                      Pay: {formatMoney(totals.paid)}
+                      {totals.opening > 0 ? 'Sal + Baki - Rec' : totals.recovery > 0 ? 'Sal - Rec' : 'Net Total'}
                     </div>
                   </td>
                   {/* Footer 8. Save Button Totals */}
@@ -1370,7 +1438,8 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               </tfoot>
             </table>
           </div>
-        )}
+        </>
+      )}
       </Card>
 
       {/* Legend & Guide footer */}
@@ -1488,12 +1557,11 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             <Button
               variant="emerald"
               size="lg"
-              onClick={() => setPreviewOpen(true)}
-              disabled={!rows.length || !validRange}
+              onClick={() => onNavigate('payout')}
               className="h-12 px-6 text-sm font-bold shadow-sm"
             >
               <Wallet className="h-4 w-4" />
-              <span>Confirm & Settle Payout</span>
+              <span>Issue Payout</span>
             </Button>
           </div>
         </div>
@@ -1747,6 +1815,8 @@ function WorkerCycleModal({
   const [paidInput, setPaidInput] = useState(
     currentInput.paid === null ? paiseToInput(row.totalDuePaise) : currentInput.paid,
   )
+  const [giveAdvanceInput, setGiveAdvanceInput] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
 
   // Adjustment form state
   const [adjType, setAdjType] = useState<'bonus' | 'fine'>('bonus')
@@ -1762,6 +1832,24 @@ function WorkerCycleModal({
     setRecoveryInput(currentInput.recovery)
     setPaidInput(currentInput.paid === null ? paiseToInput(row.totalDuePaise) : currentInput.paid)
   }, [currentInput, row.totalDuePaise])
+
+  // Dynamic calculations based on live inputs
+  const beforeRecovery = row.openingPaise + row.earnedPaise + row.adjustmentPaise
+  const maxRecoverable = Math.min(row.upadOutstandingPaise, Math.max(0, beforeRecovery))
+  const requestedRec = Math.max(0, parseMoneyInput(recoveryInput))
+  const currentRecoveryPaise = Math.min(requestedRec, maxRecoverable)
+  const liveTotalDuePaise = Math.max(0, beforeRecovery - currentRecoveryPaise)
+
+  const rawPaidPaise = paidInput === '' ? 0 : parseMoneyInput(paidInput)
+  const actualSalaryPaidPaise = Math.min(rawPaidPaise, liveTotalDuePaise)
+  const overpaidPaise = Math.max(0, rawPaidPaise - liveTotalDuePaise)
+  const freshAdvancePaise = Math.max(0, parseMoneyInput(giveAdvanceInput))
+  const totalNewAdvancePaise = overpaidPaise + freshAdvancePaise
+
+  const unpaidSalaryPaise = Math.max(0, liveTotalDuePaise - actualSalaryPaidPaise)
+  const remainingUpadDebtPaise = Math.max(0, row.upadOutstandingPaise - currentRecoveryPaise)
+  const totalCashToHandOver = actualSalaryPaidPaise + totalNewAdvancePaise
+  const isOverAdvanced = row.upadOutstandingPaise > Math.max(0, beforeRecovery)
 
   const createAdjMutation = useMutation({
     mutationFn: async () => {
@@ -1798,18 +1886,40 @@ function WorkerCycleModal({
     onError: (err) => toast(err instanceof Error ? err.message : 'Could not delete adjustment', 'error'),
   })
 
-  function handleSave() {
-    onUpdateRowInput({
-      recovery: recoveryInput,
-      paid: paidInput,
-    })
-    onClose()
-  }
+  async function handleSave() {
+    setIsSaving(true)
+    try {
+      if (totalNewAdvancePaise > 0) {
+        await createUpadEntry({
+          employeeId: row.employee.id,
+          date: payoutDate,
+          kind: 'given',
+          category: 'regular',
+          amountPaise: totalNewAdvancePaise,
+          note:
+            overpaidPaise > 0 && freshAdvancePaise > 0
+              ? `Overpayment (${formatMoney(overpaidPaise)}) + Advance (${formatMoney(freshAdvancePaise)}) on payday`
+              : overpaidPaise > 0
+                ? 'Overpayment cash recorded as advance (carry forward)'
+                : 'Advance given on payday (carry forward)',
+        })
+        queryClient.invalidateQueries({ queryKey: ['upad'] })
+        queryClient.invalidateQueries({ queryKey: ['payroll'] })
+        queryClient.invalidateQueries({ queryKey: ['employee-detail'] })
+        toast(`Recorded ${formatMoney(totalNewAdvancePaise)} advance (carried forward)`)
+      }
 
-  const maxRecoverable = Math.min(
-    row.upadOutstandingPaise,
-    Math.max(0, row.openingPaise + row.earnedPaise + row.adjustmentPaise),
-  )
+      onUpdateRowInput({
+        recovery: recoveryInput,
+        paid: paiseToInput(actualSalaryPaidPaise),
+      })
+      onClose()
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not save payment', 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <Modal
@@ -1828,10 +1938,10 @@ function WorkerCycleModal({
             <HandCoins className="h-4 w-4" />
             <span>Manage Upad</span>
           </Button>
-          <Button variant="secondary" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
             Cancel
           </Button>
-          <Button variant="emerald" onClick={handleSave}>
+          <Button variant="emerald" onClick={handleSave} loading={isSaving}>
             Save Changes
           </Button>
         </>
@@ -1864,88 +1974,137 @@ function WorkerCycleModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
+          <div
+            className={clsx(
+              'rounded-xl border p-2.5',
+              row.openingPaise > 0
+                ? 'border-sky-300 bg-sky-50/80 text-sky-950'
+                : 'border-stone-200 bg-stone-50 text-stone-900',
+            )}
+          >
+            <div className={clsx(
+              'text-[10px] font-semibold uppercase tracking-wider',
+              row.openingPaise > 0 ? 'text-sky-800' : 'text-stone-500',
+            )}>
               Opening Baki
             </div>
-            <div className="mt-1 text-base font-bold text-stone-900 tabular-nums">
+            <div className="mt-1 text-base font-bold tabular-nums">
               {formatMoney(row.openingPaise, { showZero: true })}
             </div>
-            <div className="text-[10px] font-medium text-stone-500">
-              From last cycle
+            <div className={clsx(
+              'text-[10px] font-medium',
+              row.openingPaise > 0 ? 'text-sky-700 font-semibold' : 'text-stone-500',
+            )}>
+              {row.openingPaise > 0 ? 'Carried forward from last cycle' : 'No opening baki'}
             </div>
           </div>
 
-          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-amber-800">
+          <div
+            className={clsx(
+              'rounded-xl border p-2.5',
+              row.upadOutstandingPaise > 0
+                ? 'border-amber-300 bg-amber-50/80 text-amber-950'
+                : 'border-stone-200 bg-stone-50 text-stone-900',
+            )}
+          >
+            <div className={clsx(
+              'text-[10px] font-semibold uppercase tracking-wider',
+              row.upadOutstandingPaise > 0 ? 'text-amber-800' : 'text-stone-500',
+            )}>
               Upad Debt
             </div>
-            <div className="mt-1 text-base font-bold text-amber-900 tabular-nums">
+            <div className="mt-1 text-base font-bold tabular-nums">
               {formatMoney(row.upadOutstandingPaise, { showZero: true })}
             </div>
-            <div className="text-[10px] font-medium text-amber-700/80">
-              Reg: {formatMoney(row.regularUpadPaise)} · Extra: {formatMoney(row.extraUpadPaise)}
+            <div className={clsx(
+              'text-[10px] font-medium',
+              row.upadOutstandingPaise > 0 ? 'text-amber-700' : 'text-stone-500',
+            )}>
+              Chalu: {formatMoney(row.regularUpadPaise)} · Main: {formatMoney(row.extraUpadPaise)}
             </div>
           </div>
         </div>
+
+        {/* Over-Advanced Alert */}
+        {isOverAdvanced && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3.5 text-xs text-amber-900">
+            <div className="font-bold flex items-center gap-1.5 text-amber-950">
+              <AlertCircle className="h-4 w-4 text-amber-700 shrink-0" />
+              <span>Worker is Over-Advanced by {formatMoney(row.upadOutstandingPaise - maxRecoverable)}</span>
+            </div>
+            <div className="mt-1 text-amber-800 leading-relaxed">
+              Worker owes {formatMoney(row.upadOutstandingPaise)} in advances, but only earned {formatMoney(maxRecoverable)} in this cycle.
+              {currentRecoveryPaise > 0 ? (
+                <>
+                  {' '}Deducting {formatMoney(currentRecoveryPaise)} from salary leaves <strong>{formatMoney(row.upadOutstandingPaise - currentRecoveryPaise)} Upad debt</strong>, which will <strong>automatically carry forward</strong> to next week.
+                </>
+              ) : (
+                <>
+                  {' '}The full <strong>{formatMoney(row.upadOutstandingPaise)} Upad debt</strong> will <strong>automatically carry forward</strong> to next week.
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Calculation summary bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/80 px-3.5 py-2.5 text-xs">
           <div className="flex flex-wrap items-center gap-1.5 font-medium text-stone-600">
             <span className="font-semibold text-stone-800">Summary:</span>
             <span>Salary ({formatMoney(row.earnedPaise)})</span>
-            {row.openingPaise !== 0 && <span>+ Baki ({formatMoney(row.openingPaise)})</span>}
-            {row.adjustmentPaise !== 0 && (
-              <span>{row.adjustmentPaise > 0 ? `+ Bonus (${formatMoney(row.adjustmentPaise)})` : `- Fine (${formatMoney(Math.abs(row.adjustmentPaise))})`}</span>
+            {row.openingPaise > 0 && (
+              <span className="font-bold text-sky-800">+ Last Baki ({formatMoney(row.openingPaise)})</span>
             )}
-            {row.upadRecoveryPaise > 0 && <span>- Upad Rec. ({formatMoney(row.upadRecoveryPaise)})</span>}
+            {row.adjustmentPaise !== 0 && (
+              <span>
+                {row.adjustmentPaise > 0
+                  ? `+ Bonus (${formatMoney(row.adjustmentPaise)})`
+                  : `- Fine (${formatMoney(Math.abs(row.adjustmentPaise))})`}
+              </span>
+            )}
+            {currentRecoveryPaise > 0 && (
+              <span className="font-bold text-rose-700">- Upad Rec. ({formatMoney(currentRecoveryPaise)})</span>
+            )}
           </div>
           <div className="text-right">
             <span className="text-[10px] font-semibold uppercase text-stone-500 block">Total Payable Due</span>
-            <span className="text-base font-bold text-stone-900 tabular-nums">{formatMoney(row.totalDuePaise)}</span>
+            <span className="text-base font-bold text-stone-900 tabular-nums">
+              {formatMoney(liveTotalDuePaise)}
+            </span>
           </div>
         </div>
 
         {/* Recovery & Payment Inputs */}
-        <div className="rounded-2xl border border-stone-200 p-3.5 space-y-3 bg-white">
+        <div className="rounded-2xl border border-stone-200 p-3.5 space-y-3.5 bg-white">
           <div className="text-xs font-bold text-stone-800 uppercase tracking-wide">
-            Settlement Inputs
+            Settlement & Payment Inputs
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Field
                 label="Recover Upad From Salary (₹)"
-                hint={`Max recoverable: ${formatMoney(maxRecoverable)}`}
+                hint={maxRecoverable > 0 ? `Max recoverable: ${formatMoney(maxRecoverable)}` : 'No upad to recover'}
               >
                 <Input
                   inputMode="decimal"
                   placeholder="0"
                   value={recoveryInput}
-                  onChange={(e) => {
-                    setRecoveryInput(e.target.value)
-                    onUpdateRowInput({ recovery: e.target.value })
-                  }}
+                  onChange={(e) => setRecoveryInput(e.target.value)}
                 />
               </Field>
               <div className="mt-1.5 flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    const val = paiseToInput(maxRecoverable)
-                    setRecoveryInput(val)
-                    onUpdateRowInput({ recovery: val })
-                  }}
-                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100"
+                  onClick={() => setRecoveryInput(paiseToInput(maxRecoverable))}
+                  disabled={maxRecoverable <= 0}
+                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50"
                 >
                   Max ({formatMoney(maxRecoverable)})
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setRecoveryInput('0')
-                    onUpdateRowInput({ recovery: '0' })
-                  }}
+                  onClick={() => setRecoveryInput('0')}
                   className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100"
                 >
                   Zero
@@ -1956,31 +2115,120 @@ function WorkerCycleModal({
             <div>
               <Field
                 label="Paid Now Amount (₹)"
-                hint={row.closingPaise > 0 ? `${formatMoney(row.closingPaise)} carried forward as baki` : 'Full payment settles cycle'}
+                hint={
+                  unpaidSalaryPaise > 0
+                    ? `${formatMoney(unpaidSalaryPaise)} carries forward as Last Baki`
+                    : overpaidPaise > 0
+                      ? `${formatMoney(overpaidPaise)} extra cash recorded as Upad`
+                      : 'Full payment settles this cycle'
+                }
               >
                 <Input
                   inputMode="decimal"
-                  placeholder={paiseToInput(row.totalDuePaise)}
+                  placeholder={paiseToInput(liveTotalDuePaise)}
                   value={paidInput}
-                  onChange={(e) => {
-                    setPaidInput(e.target.value)
-                    onUpdateRowInput({ paid: e.target.value })
-                  }}
+                  onChange={(e) => setPaidInput(e.target.value)}
                 />
               </Field>
               <div className="mt-1.5 flex gap-1.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    const val = paiseToInput(row.totalDuePaise)
-                    setPaidInput(val)
-                    onUpdateRowInput({ paid: val })
-                  }}
+                  onClick={() => setPaidInput(paiseToInput(liveTotalDuePaise))}
                   className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100"
                 >
-                  Pay Full ({formatMoney(row.totalDuePaise)})
+                  Pay Full ({formatMoney(liveTotalDuePaise)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaidInput('0')}
+                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100"
+                >
+                  Zero (Unpaid)
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Give Fresh Upad on Payday */}
+          <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
+              <span className="text-xs font-bold text-stone-800">
+                + Give Fresh Upad / Advance Today (₹)
+              </span>
+              <span className="text-[11px] text-amber-800 font-semibold">
+                Added to Upad & carries forward to next cycle
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[10rem]">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400">
+                  ₹
+                </span>
+                <Input
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={giveAdvanceInput}
+                  onChange={(e) => setGiveAdvanceInput(e.target.value)}
+                  className="pl-7"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                {[200, 500, 1000, 2000].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setGiveAdvanceInput(String(preset))}
+                    className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-50 shadow-2xs"
+                  >
+                    +{preset}
+                  </button>
+                ))}
+                {giveAdvanceInput && (
+                  <button
+                    type="button"
+                    onClick={() => setGiveAdvanceInput('')}
+                    className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-stone-400 hover:text-stone-700"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Live Cash Handed Over & Carry Forward Summary */}
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2 text-xs">
+            <div className="flex justify-between items-center font-bold text-emerald-950">
+              <span>Total Cash Handed to Worker Today:</span>
+              <span className="text-base font-black tabular-nums text-emerald-900">
+                {formatMoney(totalCashToHandOver, { showZero: true })}
+              </span>
+            </div>
+            <div className="border-t border-emerald-200/60 pt-1.5 space-y-1 text-[11px]">
+              <div className="flex justify-between text-emerald-900 font-medium">
+                <span>• Net salary paid out:</span>
+                <span className="tabular-nums font-bold">{formatMoney(actualSalaryPaidPaise, { showZero: true })}</span>
+              </div>
+              {totalNewAdvancePaise > 0 && (
+                <div className="flex justify-between text-amber-900 font-medium">
+                  <span>• Fresh Upad advance handed:</span>
+                  <span className="tabular-nums font-bold">+{formatMoney(totalNewAdvancePaise)} (Carries forward as Upad)</span>
+                </div>
+              )}
+              {unpaidSalaryPaise > 0 && (
+                <div className="flex justify-between text-sky-900 font-semibold">
+                  <span>• Unpaid salary:</span>
+                  <span className="tabular-nums font-bold">+{formatMoney(unpaidSalaryPaise)} (Carries forward as Last Baki)</span>
+                </div>
+              )}
+              {remainingUpadDebtPaise + totalNewAdvancePaise > 0 && (
+                <div className="flex justify-between text-stone-700 font-medium">
+                  <span>• Total Upad remaining for next cycle:</span>
+                  <span className="tabular-nums font-bold text-amber-900">
+                    {formatMoney(remainingUpadDebtPaise + totalNewAdvancePaise)} CF
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2227,8 +2475,8 @@ function WorkerUpadModal({
             </div>
           </div>
           <div className="text-right text-xs font-medium text-amber-900/80">
-            <div>Regular: {formatMoney(row.regularUpadPaise)}</div>
-            {row.extraUpadPaise > 0 && <div>Extra: {formatMoney(row.extraUpadPaise)}</div>}
+            <div>Chalu: {formatMoney(row.regularUpadPaise)}</div>
+            {row.extraUpadPaise > 0 && <div>Main: {formatMoney(row.extraUpadPaise)}</div>}
           </div>
         </div>
 
@@ -2321,6 +2569,11 @@ function WorkerUpadModal({
                 {giveError}
               </div>
             )}
+
+            <div className="flex items-center gap-1.5 text-[11px] text-amber-900 bg-amber-50/80 rounded-xl px-3 py-2 border border-amber-200/60 font-medium">
+              <CheckCircle2 className="h-4 w-4 text-amber-700 shrink-0" />
+              <span>Advances given automatically carry forward across cycles until deducted from salary or returned in cash.</span>
+            </div>
 
             <Button
               variant="emerald"
@@ -2449,6 +2702,13 @@ function WorkerUpadModal({
             {recError && (
               <div className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
                 {recError}
+              </div>
+            )}
+
+            {recMethod === 'salary' && row.upadOutstandingPaise > maxSalaryRecovery && (
+              <div className="flex items-center gap-1.5 text-[11px] text-amber-900 bg-amber-50/90 rounded-xl px-3 py-2 border border-amber-200/80 font-medium">
+                <AlertCircle className="h-4 w-4 text-amber-700 shrink-0" />
+                <span>Worker is over-advanced. Max recoverable from salary is {formatMoney(maxSalaryRecovery)}. Remaining {formatMoney(row.upadOutstandingPaise - maxSalaryRecovery)} carries forward to next cycle.</span>
               </div>
             )}
 
@@ -2789,7 +3049,7 @@ function CashReturnModal({
                 )}
               >
                 <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
-                  {value === 'regular' ? 'Regular Upad' : 'Extra Upad'}
+                  {value === 'regular' || value === 'chalu' ? 'Chalu Upad' : 'Main Upad'}
                 </div>
                 <div className="mt-0.5 text-base font-black text-stone-900 tabular-nums">
                   {formatMoney(valueBalance, { showZero: true })}
