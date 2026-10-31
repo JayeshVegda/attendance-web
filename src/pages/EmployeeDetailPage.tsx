@@ -2,14 +2,19 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
+  Calendar,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Coins,
+  HandCoins,
   History,
   Pencil,
   Phone,
   Plus,
   Power,
   RotateCcw,
+  Table,
   TrendingUp,
   User,
   Wallet,
@@ -28,10 +33,25 @@ import {
   setEmployeeActive,
   updateEmployee,
 } from '../lib/api'
-import { addDays, formatDateLong, formatDateShort, todayKey, weekdayShort } from '../lib/dates'
+import {
+  addDays,
+  formatDateLong,
+  formatDateShort,
+  monthKey,
+  monthLabel,
+  parseDate,
+  todayKey,
+  weekdayShort,
+} from '../lib/dates'
 import { formatHours, formatMoney, paiseToInput, parseMoneyInput } from '../lib/money'
-import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
-import type { Employee } from '../lib/types'
+import {
+  dayPayPaise,
+  getRateForDate,
+  latestStatementByEmployee,
+  upadBalanceForEmployee,
+  upadBreakdownForEmployee,
+} from '../lib/payroll'
+import type { Employee, UpadKind } from '../lib/types'
 import { UpadModal } from '../components/UpadModal'
 import { useToast } from '../components/Toast'
 import {
@@ -66,6 +86,10 @@ export default function EmployeeDetailPage({
   onNavigate: (path: string) => void
 }) {
   const [tab, setTab] = useState<Tab>('salary')
+  const [attView, setAttView] = useState<'calendar' | 'table'>('calendar')
+  const [calMonth, setCalMonth] = useState(() => monthKey(todayKey()))
+  const [upadLedgerCategory, setUpadLedgerCategory] = useState<'all' | 'chalu' | 'moto'>('all')
+  const [upadModalKind, setUpadModalKind] = useState<UpadKind>('given')
   const [editOpen, setEditOpen] = useState(false)
   const [rateOpen, setRateOpen] = useState(false)
   const [upadOpen, setUpadOpen] = useState(false)
@@ -81,11 +105,11 @@ export default function EmployeeDetailPage({
   const paymentsQuery = useQuery({ queryKey: ['payments'], queryFn: listPayments })
   const attendanceQuery = useQuery({
     queryKey: ['employee-attendance', employeeId],
-    queryFn: () => listAttendance(addDays(todayKey(), -90), todayKey()),
+    queryFn: () => listAttendance(addDays(todayKey(), -180), addDays(todayKey(), 30)),
   })
   const adjustmentsQuery = useQuery({
     queryKey: ['employee-adjustments', employeeId],
-    queryFn: () => listAdjustments(addDays(todayKey(), -90), todayKey()),
+    queryFn: () => listAdjustments(addDays(todayKey(), -180), todayKey()),
   })
 
   const employee = employeesQuery.data?.find((entry) => entry.id === employeeId)
@@ -118,6 +142,150 @@ export default function EmployeeDetailPage({
     () => (employee ? latestStatementByEmployee(statements).get(employee.id) : undefined),
     [employee, statements],
   )
+
+  const attendanceByDate = useMemo(() => {
+    const map: Record<string, (typeof attendance)[0]> = {}
+    for (const a of attendance) {
+      map[a.date.slice(0, 10)] = a
+    }
+    return map
+  }, [attendance])
+
+  const calMonthAttendance = useMemo(() => {
+    return attendance.filter((a) => a.date.slice(0, 7) === calMonth)
+  }, [attendance, calMonth])
+
+  const calMonthSummary = useMemo(() => {
+    let full = 0
+    let half = 0
+    let absent = 0
+    let otMinutes = 0
+    let earnedPaise = 0
+
+    for (const a of calMonthAttendance) {
+      if (a.status === 'full') full++
+      else if (a.status === 'half') half++
+      else if (a.status === 'absent') absent++
+      otMinutes += a.ot_minutes || 0
+      const rate = employee ? getRateForDate(employee, rates, a.date) : 0
+      earnedPaise += dayPayPaise(a.status, a.ot_minutes || 0, rate)
+    }
+
+    return { full, half, absent, otMinutes, earnedPaise, totalDays: full + half * 0.5 }
+  }, [calMonthAttendance, employee, rates])
+
+  const calGrid = useMemo(() => {
+    const [y, m] = calMonth.split('-').map(Number)
+    const daysInMonth = new Date(y, m, 0).getDate()
+    const firstDay = new Date(y, m - 1, 1).getDay()
+    const offset = (firstDay + 6) % 7 // Monday = 0
+
+    const days: Array<{ dateStr: string; dayNum: number } | null> = []
+    for (let i = 0; i < offset; i++) days.push(null)
+    for (let d = 1; d <= daysInMonth; d++) {
+      days.push({
+        dateStr: `${calMonth}-${String(d).padStart(2, '0')}`,
+        dayNum: d,
+      })
+    }
+    return days
+  }, [calMonth])
+
+  const upadLedger = useMemo(() => {
+    if (!employee) return []
+    type LedgerRow = {
+      id: string
+      date: string
+      category: 'chalu' | 'moto'
+      kind: string
+      description: string
+      debitPaise: number
+      creditPaise: number
+      chaluBalPaise: number
+      motoBalPaise: number
+      totalBalPaise: number
+    }
+
+    const rows: LedgerRow[] = []
+    let chalu = employee.opening_chalu_paise || 0
+    let moto = employee.opening_moto_paise || 0
+
+    if (chalu > 0 || moto > 0) {
+      rows.push({
+        id: 'opening',
+        date: employee.joined_on || employee.created?.slice(0, 10) || '2026-09-01',
+        category: chalu > 0 ? 'chalu' : 'moto',
+        kind: 'opening',
+        description: 'Opening Balance (શરૂઆતની બાકી)',
+        debitPaise: chalu + moto,
+        creditPaise: 0,
+        chaluBalPaise: chalu,
+        motoBalPaise: moto,
+        totalBalPaise: chalu + moto,
+      })
+    }
+
+    const sortedTx = [...upadEntries].sort((a, b) => (a.date < b.date ? -1 : 1))
+
+    for (const e of sortedTx) {
+      const isMoto = e.category === 'extra' || e.category === 'moto'
+      const cat = isMoto ? 'moto' : 'chalu'
+      let debit = 0
+      let credit = 0
+
+      if (e.kind === 'given') {
+        debit = e.amount_paise
+        if (isMoto) moto += debit
+        else chalu += debit
+      } else {
+        credit = e.amount_paise
+        if (isMoto) moto = Math.max(0, moto - credit)
+        else chalu = Math.max(0, chalu - credit)
+      }
+
+      rows.push({
+        id: e.id,
+        date: e.date.slice(0, 10),
+        category: cat,
+        kind: e.kind,
+        description:
+          e.note ||
+          (e.kind === 'given'
+            ? 'Cash Advance Given (ઉપાડ આપ્યો)'
+            : e.kind === 'returned'
+              ? 'Cash Repaid by Worker (રોકડા પરત)'
+              : e.kind === 'recovery'
+                ? 'Weekly Payout Recovery (પગારમાંથી કપાત)'
+                : 'Write Off (માંડવાળ)'),
+        debitPaise: debit,
+        creditPaise: credit,
+        chaluBalPaise: chalu,
+        motoBalPaise: moto,
+        totalBalPaise: chalu + moto,
+      })
+    }
+
+    return rows
+  }, [employee, upadEntries])
+
+  const filteredLedger = useMemo(() => {
+    if (upadLedgerCategory === 'all') return upadLedger
+    return upadLedger.filter((r) => r.category === upadLedgerCategory)
+  }, [upadLedger, upadLedgerCategory])
+
+  function shiftMonth(mKey: string, delta: number): string {
+    const [year, month] = mKey.split('-').map(Number)
+    const d = new Date(year, month - 1 + delta, 1)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    return `${y}-${m}`
+  }
+
+  function formatMonthName(mKey: string): string {
+    const [year, month] = mKey.split('-').map(Number)
+    const d = new Date(year, month - 1, 1)
+    return d.toLocaleString('en-IN', { month: 'long', year: 'numeric' })
+  }
 
   const toggleMutation = useMutation({
     mutationFn: () => setEmployeeActive(employeeId, !employee?.active),
@@ -458,146 +626,395 @@ export default function EmployeeDetailPage({
       {/* TAB: Attendance */}
       {tab === 'attendance' && (
         <Card className="overflow-hidden">
-          <div className="border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
-            <div className="text-sm font-extrabold text-stone-900">Recent Attendance History</div>
-            <div className="text-xs text-stone-500">
-              Last 90 days. Daily marks, overtime hours, and pay calculated per day.
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
+            <div>
+              <div className="text-sm font-extrabold text-stone-900">Attendance Log</div>
+              <div className="text-xs text-stone-500">
+                Daily marks, overtime hours, and day pay calculated for this worker.
+              </div>
+            </div>
+
+            {/* View Switcher: Calendar vs Table */}
+            <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-white p-0.5 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setAttView('calendar')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition ${
+                  attView === 'calendar'
+                    ? 'bg-emerald-700 text-white shadow-2xs'
+                    : 'text-stone-600 hover:bg-stone-100'
+                }`}
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                <span>Calendar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAttView('table')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md transition ${
+                  attView === 'table'
+                    ? 'bg-emerald-700 text-white shadow-2xs'
+                    : 'text-stone-600 hover:bg-stone-100'
+                }`}
+              >
+                <Table className="h-3.5 w-3.5" />
+                <span>List Table</span>
+              </button>
             </div>
           </div>
-          {attendance.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead className="bg-stone-50 text-left text-[10px] font-extrabold uppercase tracking-wider text-stone-500 border-b border-stone-200">
-                  <tr>
-                    <th className="px-4 py-2.5">Date</th>
-                    <th className="px-4 py-2.5">Status</th>
-                    <th className="px-4 py-2.5 text-right">OT</th>
-                    <th className="px-4 py-2.5 text-right">Day Rate</th>
-                    <th className="px-4 py-2.5 text-right">Day Pay</th>
-                    <th className="px-4 py-2.5">Note</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {attendance.map((entry) => {
-                    const rate = getRateForDate(employee, rates, entry.date)
+
+          {/* CALENDAR VIEW */}
+          {attView === 'calendar' && (
+            <div className="p-4 space-y-3">
+              {/* Calendar Month Selector & Monthly Summary */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-stone-50 p-2.5 rounded-xl border border-stone-200">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCalMonth(shiftMonth(calMonth, -1))}
+                    className="p-1 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-700"
+                    title="Previous month"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="text-sm font-black text-stone-900 min-w-[130px] text-center">
+                    {formatMonthName(calMonth)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCalMonth(shiftMonth(calMonth, 1))}
+                    className="p-1 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-700"
+                    title="Next month"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {/* Month Summary Stats */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-lg bg-emerald-100/70 border border-emerald-200 px-2 py-0.5 font-bold text-emerald-900">
+                    {calMonthSummary.full} Full · {calMonthSummary.half} Half
+                  </span>
+                  {calMonthSummary.otMinutes > 0 && (
+                    <span className="rounded-lg bg-teal-100/70 border border-teal-200 px-2 py-0.5 font-bold text-teal-900">
+                      +{formatHours(calMonthSummary.otMinutes)} OT
+                    </span>
+                  )}
+                  <span className="rounded-lg bg-stone-200/80 px-2 py-0.5 font-black text-stone-900 tabular-nums">
+                    Month Earned: {formatMoney(calMonthSummary.earnedPaise)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Minimal Calendar Grid */}
+              <div className="rounded-xl border border-stone-200 overflow-hidden bg-white">
+                {/* 7 Days Headers */}
+                <div className="grid grid-cols-7 bg-stone-100 text-center text-[10px] font-extrabold uppercase tracking-wider text-stone-500 py-2 border-b border-stone-200">
+                  <div>Mon</div>
+                  <div>Tue</div>
+                  <div>Wed</div>
+                  <div>Thu</div>
+                  <div className="text-amber-800">Fri (Off)</div>
+                  <div>Sat</div>
+                  <div>Sun</div>
+                </div>
+
+                {/* Day Cells Grid */}
+                <div className="grid grid-cols-7 divide-x divide-y divide-stone-100">
+                  {calGrid.map((item, idx) => {
+                    if (!item) {
+                      return <div key={`empty-${idx}`} className="h-18 bg-stone-50/40 p-1" />
+                    }
+
+                    const record = attendanceByDate[item.dateStr]
+                    const isToday = item.dateStr === todayKey()
+                    const dayOfWeek = parseDate(item.dateStr).getDay()
+                    const isWeeklyOff = dayOfWeek === 5 // Friday
+
                     return (
-                      <tr key={entry.id} className="hover:bg-stone-50/70 transition-colors">
-                        <td className="px-4 py-3">
-                          <div className="font-extrabold text-stone-900">
-                            {formatDateShort(entry.date)}
+                      <div
+                        key={item.dateStr}
+                        className={`h-18 p-1.5 flex flex-col justify-between transition-colors ${
+                          isToday ? 'bg-amber-50/50 ring-2 ring-emerald-500 inset-0' : 'hover:bg-stone-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`text-xs font-black ${
+                              isToday
+                                ? 'h-5 w-5 rounded-full bg-emerald-700 text-white flex items-center justify-center'
+                                : 'text-stone-700'
+                            }`}
+                          >
+                            {item.dayNum}
+                          </span>
+
+                          {record ? (
+                            <span
+                              className={`rounded px-1.5 py-0.2 text-[10px] font-black uppercase ${
+                                record.status === 'full'
+                                  ? 'bg-emerald-600 text-white'
+                                  : record.status === 'half'
+                                    ? 'bg-amber-500 text-white'
+                                    : 'bg-rose-500 text-white'
+                              }`}
+                            >
+                              {record.status === 'full' ? 'P' : record.status === 'half' ? 'H' : 'A'}
+                            </span>
+                          ) : isWeeklyOff ? (
+                            <span className="text-[10px] text-stone-400 font-bold">Off</span>
+                          ) : null}
+                        </div>
+
+                        {record ? (
+                          <div className="text-right">
+                            {record.ot_minutes > 0 && (
+                              <div className="text-[10px] font-bold text-teal-700 leading-none">
+                                +{formatHours(record.ot_minutes)}
+                              </div>
+                            )}
+                            <div className="text-[10px] font-extrabold text-stone-900 tabular-nums">
+                              {formatMoney(
+                                dayPayPaise(
+                                  record.status,
+                                  record.ot_minutes || 0,
+                                  employee ? getRateForDate(employee, rates, record.date) : 0,
+                                ),
+                              )}
+                            </div>
                           </div>
-                          <div className="text-[10px] text-stone-400">{weekdayShort(entry.date)}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge tone={STATUS_TONE[entry.status]} dot className="capitalize">
-                            {entry.status}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-xs font-semibold text-stone-700">
-                          {entry.ot_minutes ? formatHours(entry.ot_minutes) : '—'}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-xs text-stone-500">
-                          {formatMoney(rate)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums text-xs font-black text-stone-900">
-                          {formatMoney(dayPayPaise(entry.status, entry.ot_minutes || 0, rate))}
-                        </td>
-                        <td className="max-w-[14rem] truncate px-4 py-3 text-xs text-stone-500">
-                          {entry.note || '—'}
-                        </td>
-                      </tr>
+                        ) : (
+                          <div className="text-[10px] text-stone-300 text-right">—</div>
+                        )}
+                      </div>
                     )
                   })}
-                </tbody>
-              </table>
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="p-8">
-              <EmptyState
-                icon={<CalendarDays className="h-7 w-7 text-stone-400" />}
-                title="No Attendance In Last 90 Days"
-                description="Mark attendance from the Attendance page to see daily activity here."
-              />
-            </div>
+          )}
+
+          {/* TABLE VIEW */}
+          {attView === 'table' && (
+            <>
+              {attendance.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead className="bg-stone-50 text-left text-[10px] font-extrabold uppercase tracking-wider text-stone-500 border-b border-stone-200">
+                      <tr>
+                        <th className="px-4 py-2.5">Date</th>
+                        <th className="px-4 py-2.5">Status</th>
+                        <th className="px-4 py-2.5 text-right">OT</th>
+                        <th className="px-4 py-2.5 text-right">Day Rate</th>
+                        <th className="px-4 py-2.5 text-right">Day Pay</th>
+                        <th className="px-4 py-2.5">Note</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {attendance.map((entry) => {
+                        const rate = employee ? getRateForDate(employee, rates, entry.date) : 0
+                        return (
+                          <tr key={entry.id} className="hover:bg-stone-50/70 transition-colors">
+                            <td className="px-4 py-2.5">
+                              <div className="font-extrabold text-stone-900">
+                                {formatDateShort(entry.date)}
+                              </div>
+                              <div className="text-[10px] text-stone-400">{weekdayShort(entry.date)}</div>
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <Badge tone={STATUS_TONE[entry.status]} dot className="capitalize">
+                                {entry.status}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-xs font-semibold text-stone-700">
+                              {entry.ot_minutes ? formatHours(entry.ot_minutes) : '—'}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-xs text-stone-500">
+                              {formatMoney(rate)}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-xs font-black text-stone-900">
+                              {formatMoney(dayPayPaise(entry.status, entry.ot_minutes || 0, rate))}
+                            </td>
+                            <td className="max-w-[14rem] truncate px-4 py-2.5 text-xs text-stone-500">
+                              {entry.note || '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-8">
+                  <EmptyState
+                    icon={<CalendarDays className="h-7 w-7 text-stone-400" />}
+                    title="No Attendance In Last 90 Days"
+                    description="Mark attendance from the Attendance page to see daily activity here."
+                  />
+                </div>
+              )}
+            </>
           )}
         </Card>
       )}
 
-      {/* TAB: Upad & Rates */}
+      {/* TAB: Upad & Ledger */}
       {tab === 'upad' && (
-        <div className="grid gap-5 xl:grid-cols-2">
-          {/* Upad Transactions */}
+        <div className="space-y-4">
+          {/* Main Khatavahi Upad Ledger Card */}
           <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
               <div>
-                <div className="text-sm font-extrabold text-stone-900">Upad Transactions</div>
-                <div className="text-xs text-stone-500">Advances, cash returns, and recoveries.</div>
+                <div className="text-sm font-extrabold text-stone-900 flex items-center gap-2">
+                  <span>Upad & Loan Ledger (ખાતાવહી)</span>
+                  <Badge tone={upadBalance > 0 ? 'amber' : 'green'}>
+                    Total Loan: {formatMoney(upadBalance)}
+                  </Badge>
+                </div>
+                <div className="text-xs text-stone-500">
+                  Full chronological running balance of advances, repayments, and payout recoveries.
+                </div>
               </div>
-              <Button size="sm" variant="secondary" onClick={() => setUpadOpen(true)}>
-                <Plus className="h-3.5 w-3.5" /> Give Upad
-              </Button>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setUpadModalKind('returned')
+                    setUpadOpen(true)
+                  }}
+                  className="text-emerald-800 border-emerald-300 bg-emerald-50"
+                >
+                  <HandCoins className="h-3.5 w-3.5 mr-1" />
+                  <span>+ Cash Return / Jama</span>
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setUpadModalKind('given')
+                    setUpadOpen(true)
+                  }}
+                  className="bg-emerald-700 text-white"
+                >
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  <span>+ Give Upad</span>
+                </Button>
+              </div>
             </div>
-            {upadEntries.length ? (
-              <div className="divide-y divide-stone-100 max-h-[30rem] overflow-y-auto">
-                {upadEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-stone-50 transition"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          tone={
-                            entry.kind === 'given'
-                              ? 'amber'
-                              : entry.kind === 'returned'
-                                ? 'blue'
-                                : entry.kind === 'writeoff'
-                                  ? 'neutral'
-                                  : 'green'
-                          }
-                          dot
-                        >
-                          {entry.kind === 'returned' ? 'Cash returned' : entry.kind}
-                        </Badge>
-                        <span
-                          className={clsx(
-                            'text-sm font-black tabular-nums',
-                            entry.kind === 'given' ? 'text-rose-600' : 'text-emerald-700',
+
+            {/* Balances & Category Filter Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-stone-50 border-b border-stone-200">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setUpadLedgerCategory('all')}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                    upadLedgerCategory === 'all'
+                      ? 'bg-stone-900 text-white'
+                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  All Accounts ({formatMoney(upadBalance)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUpadLedgerCategory('chalu')}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                    upadLedgerCategory === 'chalu'
+                      ? 'bg-amber-800 text-white'
+                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  Chalu Upad ({formatMoney(upadBreakdown.chaluPaise)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUpadLedgerCategory('moto')}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                    upadLedgerCategory === 'moto'
+                      ? 'bg-purple-800 text-white'
+                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                  }`}
+                >
+                  Main Upad ({formatMoney(upadBreakdown.motoPaise)})
+                </button>
+              </div>
+
+              <div className="text-xs font-bold text-stone-600">
+                {filteredLedger.length} ledger entries recorded
+              </div>
+            </div>
+
+            {/* Running Ledger Table */}
+            {filteredLedger.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-xs">
+                  <thead className="bg-stone-100/80 text-stone-600 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
+                    <tr>
+                      <th className="py-2 px-3 text-left">Date</th>
+                      <th className="py-2 px-2.5 text-left">Account</th>
+                      <th className="py-2 px-3 text-left">Description / Note</th>
+                      <th className="py-2 px-3 text-right text-rose-700">Debit (+ Given)</th>
+                      <th className="py-2 px-3 text-right text-emerald-700">Credit (- Repaid)</th>
+                      <th className="py-2 px-3 text-right font-black text-stone-900 bg-stone-100">
+                        Balance (બાકી)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100 font-medium">
+                    {filteredLedger.map((row) => (
+                      <tr key={row.id} className="hover:bg-stone-50/80 transition-colors">
+                        <td className="py-2 px-3 whitespace-nowrap text-stone-700 font-bold">
+                          {formatDateShort(row.date)}
+                        </td>
+                        <td className="py-2 px-2.5 whitespace-nowrap">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
+                              row.category === 'moto'
+                                ? 'bg-purple-50 text-purple-900 border border-purple-200'
+                                : 'bg-amber-50 text-amber-900 border border-amber-200'
+                            }`}
+                          >
+                            {row.category === 'moto' ? 'Main Upad' : 'Chalu Upad'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 text-stone-800">
+                          {row.description}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums font-bold text-rose-700">
+                          {row.debitPaise > 0 ? `+${formatMoney(row.debitPaise)}` : '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums font-bold text-emerald-700">
+                          {row.creditPaise > 0 ? `−${formatMoney(row.creditPaise)}` : '—'}
+                        </td>
+                        <td className="py-2 px-3 text-right tabular-nums font-black text-stone-950 bg-stone-50/50">
+                          {formatMoney(
+                            upadLedgerCategory === 'chalu'
+                              ? row.chaluBalPaise
+                              : upadLedgerCategory === 'moto'
+                                ? row.motoBalPaise
+                                : row.totalBalPaise,
                           )}
-                        >
-                          {entry.kind === 'given' ? '+' : '−'}
-                          {formatMoney(entry.amount_paise)}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-xs text-stone-400">
-                        {formatDateShort(entry.date)} ·{' '}
-                        <span className="font-semibold text-stone-600">
-                          {entry.category === 'extra' || entry.category === 'moto' ? 'Main Upad' : 'Chalu Upad'}
-                        </span>
-                        {entry.note ? ` · ${entry.note}` : ''}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-stone-300">
-                        {entry.statement ? 'payout' : 'manual'}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             ) : (
               <div className="p-8">
                 <EmptyState
                   icon={<Coins className="h-7 w-7 text-stone-400" />}
                   title="No Upad Entries"
-                  description="Advances and repayments will appear here."
+                  description="Advances and repayments will appear here with running balance."
                 />
               </div>
             )}
           </Card>
 
-          {/* Rate History */}
+          {/* Wage Rate History Card */}
           <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
               <div>
@@ -610,17 +1027,17 @@ export default function EmployeeDetailPage({
                 <TrendingUp className="h-3.5 w-3.5" /> Adjust Rate
               </Button>
             </div>
-            <div className="divide-y divide-stone-100 max-h-[30rem] overflow-y-auto">
+            <div className="divide-y divide-stone-100 max-h-[16rem] overflow-y-auto">
               {[...rates].reverse().map((rate) => (
                 <div
                   key={rate.id}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-stone-50 transition"
+                  className="flex items-center justify-between px-4 py-2.5 hover:bg-stone-50 transition text-xs"
                 >
                   <div>
-                    <div className="text-sm font-black text-stone-900 tabular-nums">
+                    <div className="font-black text-stone-900 tabular-nums">
                       {formatMoney(rate.daily_rate_paise)} / day
                     </div>
-                    <div className="text-xs text-stone-400">
+                    <div className="text-stone-400">
                       Effective from {formatDateLong(rate.effective_from)}
                       {rate.note ? ` · ${rate.note}` : ''}
                     </div>
@@ -634,8 +1051,8 @@ export default function EmployeeDetailPage({
                 </div>
               ))}
               {!rates.length && (
-                <div className="p-8">
-                  <EmptyState icon={<TrendingUp className="h-7 w-7 text-stone-400" />} title="No Rate History" />
+                <div className="p-6">
+                  <EmptyState icon={<TrendingUp className="h-6 w-6 text-stone-400" />} title="No Rate History" />
                 </div>
               )}
             </div>
@@ -739,6 +1156,7 @@ export default function EmployeeDetailPage({
         onClose={() => setUpadOpen(false)}
         employees={[employee]}
         defaultEmployeeId={employee.id}
+        defaultKind={upadModalKind}
       />
 
       {/* Confirm Deactivation Dialog */}

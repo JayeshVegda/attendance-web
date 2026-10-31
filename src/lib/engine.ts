@@ -303,17 +303,20 @@ export function computePayout(
   const chaluBalance = upadBalance(upad_entries, "chalu", worker.opening_chalu_paise, cutoff);
   const motoBalance = upadBalance(upad_entries, "moto", worker.opening_moto_paise, cutoff);
 
+  const chaluMaxRec = Math.max(0, chaluBalance);
+  const motoMaxRec = Math.max(0, motoBalance);
+
   const errors: EngineError[] = [];
-  if (inputs.chalu_recovery_paise < 0 || inputs.chalu_recovery_paise > chaluBalance) {
+  if (inputs.chalu_recovery_paise < 0 || inputs.chalu_recovery_paise > chaluMaxRec) {
     errors.push({
       code: "chalu_recovery_exceeds_balance",
-      amount: Math.max(0, inputs.chalu_recovery_paise - chaluBalance),
+      amount: Math.max(0, inputs.chalu_recovery_paise - chaluMaxRec),
     });
   }
-  if (inputs.moto_recovery_paise < 0 || inputs.moto_recovery_paise > motoBalance) {
+  if (inputs.moto_recovery_paise < 0 || inputs.moto_recovery_paise > motoMaxRec) {
     errors.push({
       code: "moto_recovery_exceeds_balance",
-      amount: Math.max(0, inputs.moto_recovery_paise - motoBalance),
+      amount: Math.max(0, inputs.moto_recovery_paise - motoMaxRec),
     });
   }
   const totalRecovery = Math.max(0, inputs.chalu_recovery_paise) + Math.max(0, inputs.moto_recovery_paise);

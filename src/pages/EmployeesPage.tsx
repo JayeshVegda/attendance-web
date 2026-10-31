@@ -21,7 +21,7 @@ import {
   listUpadEntries,
 } from '../lib/api'
 import { otDivisor } from '../lib/cycle'
-import { addDays, formatDateLong, todayKey } from '../lib/dates'
+import { addDays, formatDateLong, formatDateShort, todayKey } from '../lib/dates'
 import { formatMoney, parseMoneyInput } from '../lib/money'
 import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
 import { UpadModal } from '../components/UpadModal'
@@ -222,156 +222,182 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
           />
         </Card>
       ) : (
-        <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((employee) => {
-            const latest = latestStatements.get(employee.id)
-            const carry = latest?.closing_paise ?? employee.opening_salary_paise ?? 0
-            const employeeAttendance = payrollQuery.data?.attendance?.filter((a) => a.employee === employee.id && !a.settled_payout) ?? []
-            let earnedCycle = 0
-            for (const a of employeeAttendance) {
-              const r = getRateForDate(employee, ratesQuery.data ?? [], a.date)
-              earnedCycle += dayPayPaise(a.status, a.ot_minutes || 0, r, divisor)
-            }
-            const employeeAdjustments = payrollQuery.data?.adjustments?.filter((adj) => adj.employee === employee.id && !adj.settled_payout) ?? []
-            const adjustmentCycle = employeeAdjustments.reduce((sum, adj) => sum + (adj.amount_paise || 0), 0)
-            const owedNow = carry + earnedCycle + adjustmentCycle
+        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-2xs">
+          <table className="w-full border-collapse text-left text-xs">
+            <thead className="bg-stone-50 border-b border-stone-200 text-stone-600 font-extrabold uppercase text-[10px] tracking-wider select-none">
+              <tr>
+                <th className="py-2.5 px-3">Worker</th>
+                <th className="py-2.5 px-2.5">Status</th>
+                <th className="py-2.5 px-2.5 text-right">Wage Rate</th>
+                <th className="py-2.5 px-2.5 text-right">Unsettled Owed</th>
+                <th className="py-2.5 px-2.5 text-right text-stone-500">Chalu Upad</th>
+                <th className="py-2.5 px-2.5 text-right text-stone-500">Main Upad</th>
+                <th className="py-2.5 px-2.5 text-right">Total Upad</th>
+                <th className="py-2.5 px-2.5">Contact</th>
+                <th className="py-2.5 px-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100 font-medium">
+              {filtered.map((employee) => {
+                const latest = latestStatements.get(employee.id)
+                const carry = latest?.closing_paise ?? employee.opening_salary_paise ?? 0
+                const employeeAttendance =
+                  payrollQuery.data?.attendance?.filter(
+                    (a) => a.employee === employee.id && !a.settled_payout,
+                  ) ?? []
+                let earnedCycle = 0
+                for (const a of employeeAttendance) {
+                  const r = getRateForDate(employee, ratesQuery.data ?? [], a.date)
+                  earnedCycle += dayPayPaise(a.status, a.ot_minutes || 0, r, divisor)
+                }
+                const employeeAdjustments =
+                  payrollQuery.data?.adjustments?.filter(
+                    (adj) => adj.employee === employee.id && !adj.settled_payout,
+                  ) ?? []
+                const adjustmentCycle = employeeAdjustments.reduce(
+                  (sum, adj) => sum + (adj.amount_paise || 0),
+                  0,
+                )
+                const owedNow = carry + earnedCycle + adjustmentCycle
 
-            const upadBreakdown = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
-            const upadTotal = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
+                const upadBreakdown = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
+                const upadTotal = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
 
-            return (
-              <Card
-                key={employee.id}
-                className={clsx(
-                  'group flex flex-col justify-between p-4 transition-all duration-200 hover:border-teal-400 hover:shadow-md',
-                  !employee.active && 'bg-stone-50/70 opacity-75',
-                )}
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <Avatar name={employee.name} size="md" />
-                      <div className="min-w-0">
-                        <div className="truncate text-base font-extrabold text-stone-900 group-hover:text-teal-700 transition">
-                          {employee.name}
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-stone-400">
-                          <span className="font-semibold text-stone-500">#{employee.employee_no}</span>
-                          {employee.phone && (
-                            <>
-                              <span>•</span>
-                              <a
-                                href={`tel:${employee.phone}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 hover:text-teal-600 transition"
-                                title="Click to call"
-                              >
-                                <Phone className="h-3 w-3" />
-                                <span>{employee.phone}</span>
-                              </a>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <Badge tone={employee.active ? 'green' : 'neutral'} dot>
-                      {employee.active ? 'Active' : 'Inactive'}
-                    </Badge>
-                  </div>
-
-                  {/* Rate & Balances grid */}
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <div className="rounded-xl border border-stone-200/80 bg-stone-50/70 px-3 py-2">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                        Daily Wage Rate
-                      </div>
-                      <div className="mt-0.5 text-sm font-black text-stone-900 tabular-nums">
-                        {formatMoney(employee.daily_rate_paise)}/d
-                      </div>
-                    </div>
-
-                    <div
-                      className={clsx(
-                        'rounded-xl border px-3 py-2',
-                        owedNow > 0
-                          ? 'border-amber-200 bg-amber-50/80'
-                          : 'border-stone-200/80 bg-stone-50/70',
-                      )}
-                    >
-                      <div
-                        className={clsx(
-                          'text-[10px] font-bold uppercase tracking-wider',
-                          owedNow > 0 ? 'text-amber-700' : 'text-stone-400',
-                        )}
+                return (
+                  <tr
+                    key={employee.id}
+                    className={`hover:bg-stone-50/80 transition-colors ${
+                      !employee.active ? 'opacity-60 bg-stone-50/30' : ''
+                    }`}
+                  >
+                    {/* 1. Worker */}
+                    <td className="py-2 px-3">
+                      <button
+                        type="button"
+                        onClick={() => onNavigate(`employees/${employee.id}`)}
+                        className="flex items-center gap-2.5 text-left group"
                       >
-                        Owed Now
-                      </div>
-                      <div
-                        className={clsx(
-                          'mt-0.5 text-sm font-black tabular-nums',
-                          owedNow > 0 ? 'text-amber-800' : 'text-stone-900',
-                        )}
+                        <Avatar name={employee.name} size="sm" />
+                        <div>
+                          <div className="font-extrabold text-stone-900 group-hover:text-emerald-700 transition">
+                            {employee.name}
+                          </div>
+                          <div className="text-[10px] text-stone-400">
+                            #{employee.employee_no}
+                            {employee.joined_on && (
+                              <span> · Joined {formatDateShort(employee.joined_on)}</span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    </td>
+
+                    {/* 2. Status */}
+                    <td className="py-2 px-2.5">
+                      <Badge tone={employee.active ? 'green' : 'neutral'} dot>
+                        {employee.active ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </td>
+
+                    {/* 3. Wage Rate */}
+                    <td className="py-2 px-2.5 text-right tabular-nums font-bold text-stone-900">
+                      {formatMoney(employee.daily_rate_paise)}
+                      <span className="text-[10px] text-stone-400 font-normal">/d</span>
+                    </td>
+
+                    {/* 4. Unsettled Owed */}
+                    <td className="py-2 px-2.5 text-right tabular-nums">
+                      <span
+                        className={`font-black ${owedNow > 0 ? 'text-amber-800' : 'text-stone-700'}`}
                       >
                         {formatMoney(owedNow, { showZero: true })}
-                      </div>
-                      <div className="text-[10px] text-stone-500 font-medium truncate">
-                        Carry in: {formatMoney(carry)}
-                      </div>
-                    </div>
-                  </div>
+                      </span>
+                      {carry > 0 && (
+                        <div className="text-[9px] text-stone-400">Carry: {formatMoney(carry)}</div>
+                      )}
+                    </td>
 
-                  {/* Upad status */}
-                  <div className="mt-3 rounded-xl bg-stone-50/60 px-3 py-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-stone-500 font-medium">Upad Total:</span>
+                    {/* 5. Chalu Upad */}
+                    <td className="py-2 px-2.5 text-right tabular-nums text-stone-600">
+                      {upadBreakdown.chaluPaise > 0 ? (
+                        <span className="font-semibold text-amber-900">
+                          {formatMoney(upadBreakdown.chaluPaise)}
+                        </span>
+                      ) : (
+                        '0'
+                      )}
+                    </td>
+
+                    {/* 6. Main Upad */}
+                    <td className="py-2 px-2.5 text-right tabular-nums text-stone-600">
+                      {upadBreakdown.motoPaise > 0 ? (
+                        <span className="font-semibold text-purple-900">
+                          {formatMoney(upadBreakdown.motoPaise)}
+                        </span>
+                      ) : (
+                        '0'
+                      )}
+                    </td>
+
+                    {/* 7. Total Upad */}
+                    <td className="py-2 px-2.5 text-right tabular-nums">
                       <span
-                        className={clsx(
-                          'font-black tabular-nums',
-                          upadTotal > 0 ? 'text-rose-600' : 'text-stone-700',
-                        )}
+                        className={`font-black ${upadTotal > 0 ? 'text-rose-700' : 'text-stone-400'}`}
                       >
                         {formatMoney(upadTotal, { showZero: true })}
                       </span>
-                    </div>
-                    <div className="mt-0.5 text-[10px] text-stone-500 font-medium text-right">
-                      Chalu: <span className="font-bold text-stone-700">{formatMoney(upadBreakdown.chaluPaise)}</span> · Main: <span className="font-bold text-stone-700">{formatMoney(upadBreakdown.motoPaise)}</span>
-                    </div>
-                  </div>
-                </div>
+                    </td>
 
-                {/* Card actions footer */}
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-1 border-t border-stone-100 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setUpadTargetId(employee.id)}
-                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50 transition"
-                  >
-                    <HandCoins className="h-3.5 w-3.5" />
-                    <span>+ Upad</span>
-                  </button>
+                    {/* 8. Contact */}
+                    <td className="py-2 px-2.5 text-stone-600 whitespace-nowrap">
+                      {employee.phone ? (
+                        <a
+                          href={`tel:${employee.phone}`}
+                          className="inline-flex items-center gap-1 hover:text-emerald-700 transition"
+                          title="Call employee"
+                        >
+                          <Phone className="h-3 w-3 text-stone-400" />
+                          <span>{employee.phone}</span>
+                        </a>
+                      ) : (
+                        <span className="text-stone-300">—</span>
+                      )}
+                    </td>
 
-                  <button
-                    type="button"
-                    onClick={() => onNavigate(`payout?worker=${employee.id}`)}
-                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-100 border border-emerald-200 transition"
-                    title={`Open payout for ${employee.name}`}
-                  >
-                    <Wallet className="h-3.5 w-3.5 text-emerald-700" />
-                    <span>Pay Now</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => onNavigate(`employees/${employee.id}`)}
-                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-bold text-teal-700 hover:bg-teal-50 transition"
-                  >
-                    <span>Profile</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </Card>
-            )
-          })}
+                    {/* 9. Actions */}
+                    <td className="py-2 px-3 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setUpadTargetId(employee.id)}
+                          className="rounded-lg border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 px-2 py-1 text-xs font-bold text-amber-800 transition"
+                          title="Give upad or record cash return"
+                        >
+                          + Upad
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigate(`payout?worker=${employee.id}`)}
+                          className="rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-900 transition"
+                          title="Open payout screen"
+                        >
+                          Pay
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigate(`employees/${employee.id}`)}
+                          className="rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 px-2 py-1 text-xs font-bold text-stone-700 transition"
+                          title="View full profile and history"
+                        >
+                          View →
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
