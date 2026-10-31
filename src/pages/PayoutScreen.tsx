@@ -537,6 +537,23 @@ export default function PayoutScreen({
               const inp = getRowInput(inputs, emp.id)
               const isInactive = !emp.active
 
+              // Loan history context: last taken & last payment
+              const chaluGiven = r.context.upads
+                .filter((u) => !u.voided && u.bucket === 'chalu' && u.kind === 'given')
+                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+
+              const chaluPaid = r.context.upads
+                .filter((u) => !u.voided && u.bucket === 'chalu' && (u.kind === 'recovery' || u.kind === 'returned'))
+                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+
+              const motoGiven = r.context.upads
+                .filter((u) => !u.voided && u.bucket === 'moto' && u.kind === 'given')
+                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+
+              const motoPaid = r.context.upads
+                .filter((u) => !u.voided && u.bucket === 'moto' && (u.kind === 'recovery' || u.kind === 'returned'))
+                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+
               const handleQuickSettle = () => {
                 if (!c) return
                 const crVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
@@ -598,7 +615,7 @@ export default function PayoutScreen({
                           const otMins = c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0)
                           return (
                             <span
-                              className="inline-flex items-center gap-1 rounded-md bg-stone-100 border border-stone-200/80 px-1.5 py-0.5 text-[10px] font-bold text-stone-700 tracking-tight"
+                              className="inline-flex items-center gap-1 rounded-[4px] bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-700 tracking-tight"
                               title={`Cycle ${cycleDays} days: ${fullCount} Present, ${halfCount} Half, ${absentCount} Absent, ${formatHours(otMins)} Overtime`}
                             >
                               <span className="text-stone-900 font-extrabold">{daysWorked}/{cycleDays}d</span>
@@ -617,9 +634,9 @@ export default function PayoutScreen({
                         })()}
                       </button>
 
-                      {/* Daily Attendance Pills: e.g. 27/10 P, 28/10 H, 29/10 P + 3 */}
+                      {/* Daily Attendance Pills: Seamless Notion tag style */}
                       {c && c.day_breakdown.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1 pl-1 border-l border-stone-200">
+                        <div className="flex flex-wrap items-center gap-1 pl-1.5 border-l border-stone-200">
                           {c.day_breakdown.map((d) => {
                             const isFull = d.status === 'full'
                             const isHalf = d.status === 'half'
@@ -631,8 +648,8 @@ export default function PayoutScreen({
                               parts.length === 3
                                 ? `${parseInt(parts[2], 10)}/${parseInt(parts[1], 10)}`
                                 : d.date
-                            const otLabel = hasOt
-                              ? `+ ${d.ot_minutes % 60 === 0 ? `${d.ot_minutes / 60}` : formatHours(d.ot_minutes)}`
+                            const otText = hasOt
+                              ? `+${d.ot_minutes % 60 === 0 ? `${d.ot_minutes / 60}` : formatHours(d.ot_minutes)}`
                               : ''
                             return (
                               <button
@@ -640,27 +657,27 @@ export default function PayoutScreen({
                                 type="button"
                                 onClick={() => setInspectingWorkerId(emp.id)}
                                 className={clsx(
-                                  'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold border transition-all cursor-pointer select-none',
-                                  isFull && !hasOt && 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100',
-                                  isFull && hasOt && 'bg-emerald-100 text-emerald-950 border-emerald-300 ring-1 ring-emerald-400/30 hover:bg-emerald-200',
-                                  isHalf && 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100',
-                                  isAbsent && 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100',
-                                  !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-400 border-stone-200 hover:bg-stone-100',
+                                  'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] leading-tight transition-colors cursor-pointer select-none',
+                                  isFull && !hasOt && 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100',
+                                  isFull && hasOt && 'bg-emerald-100/90 text-emerald-950 hover:bg-emerald-200/90',
+                                  isHalf && 'bg-amber-50 text-amber-900 hover:bg-amber-100',
+                                  isAbsent && 'bg-rose-50 text-rose-800 hover:bg-rose-100',
+                                  !isFull && !isHalf && !isAbsent && 'bg-stone-100 text-stone-500 hover:bg-stone-200',
                                 )}
                                 title={`${d.date}: ${isFull ? 'Present' : isHalf ? 'Half day' : isAbsent ? 'Absent' : 'Unmarked'}${hasOt ? ` (+${formatHours(d.ot_minutes)} OT)` : ''}`}
                               >
-                                <span className="text-stone-500 font-medium">{dateLabel}</span>
+                                <span className="text-stone-400 font-normal text-[9.5px]">{dateLabel}</span>
                                 <span
                                   className={clsx(
-                                    'font-black',
+                                    'font-bold',
                                     isFull ? 'text-emerald-800' : isHalf ? 'text-amber-800' : isAbsent ? 'text-rose-800' : 'text-stone-400'
                                   )}
                                 >
                                   {statusLetter}
                                 </span>
                                 {hasOt && (
-                                  <span className="font-black text-emerald-900 bg-emerald-200/90 px-0.5 rounded text-[9px] tabular-nums">
-                                    {otLabel}
+                                  <span className="font-extrabold text-emerald-800 text-[9px] tabular-nums">
+                                    {otText}
                                   </span>
                                 )}
                               </button>
@@ -754,11 +771,16 @@ export default function PayoutScreen({
                     </div>
 
                     {/* Block 2: Loan Deductions (Upad) */}
-                    <div className="rounded-xl border border-amber-200/80 bg-amber-50/50 p-2.5 flex flex-col justify-between space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-amber-900 border-b border-amber-200/60 pb-1">
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-2.5 flex flex-col justify-between space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-stone-600 border-b border-stone-200/80 pb-1">
                         <span>2. Loan Deductions (ઉપાડ કપાત)</span>
                         <span
-                          className="font-bold text-amber-950 tabular-nums normal-case text-[11px]"
+                          className={clsx(
+                            'font-bold tabular-nums normal-case text-[11px] px-1.5 py-0.2 rounded',
+                            c && c.chalu_after_paise + c.moto_after_paise > 0
+                              ? 'bg-amber-100 text-amber-900'
+                              : 'bg-stone-100 text-stone-500',
+                          )}
                           title={`Chalu: ${formatMoney(c ? c.chalu_after_paise : 0)} + Main: ${formatMoney(c ? c.moto_after_paise : 0)}`}
                         >
                           Remaining: <strong>{formatMoney(c ? c.chalu_after_paise + c.moto_after_paise : 0)}</strong>
@@ -766,80 +788,130 @@ export default function PayoutScreen({
                       </div>
 
                       <div className="space-y-1.5">
-                        {/* Chalu Cut */}
-                        <div className="flex items-center justify-between gap-1">
-                          <div>
-                            <div className="text-[11px] font-bold text-amber-950">Chalu Loan:</div>
-                            <div className="text-[10px] text-stone-500 tabular-nums">
-                              Bal: {c ? formatMoney(c.chalu_balance_paise) : '0'}
+                        {/* Chalu Loan Card */}
+                        <div className="rounded-lg border border-amber-200/90 bg-white p-2 shadow-2xs">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-black text-amber-950">Chalu Upad</span>
+                              <span className="rounded bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 text-[10px] font-extrabold tabular-nums">
+                                Bal: {c ? formatMoney(c.chalu_balance_paise) : '₹0'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-stone-400 font-medium">Cut:</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={inp.cr}
+                                onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
+                                className="h-6.5 w-18 px-1.5 text-right font-black text-xs rounded border border-amber-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
+                              />
+                              {c && c.chalu_balance_paise > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
+                                    setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                                  }}
+                                  className="text-[9px] font-bold text-amber-900 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 cursor-pointer"
+                                  title="Deduct maximum possible"
+                                >
+                                  Max
+                                </button>
+                              )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="0"
-                              value={inp.cr}
-                              onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
-                              className="h-7 w-20 px-1.5 text-right font-black text-xs rounded border border-amber-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
-                            />
-                            {c && c.chalu_balance_paise > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                                  setRowField(emp.id, 'cr', (maxVal / 100).toString())
-                                }}
-                                className="text-[10px] font-bold text-amber-800 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 bg-white"
-                                title="Deduct maximum possible"
-                              >
-                                Max
-                              </button>
-                            )}
+
+                          {/* Last Taken & Last Paid Context */}
+                          <div className="flex flex-wrap items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 gap-1 text-stone-500">
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400">Last taken:</span>
+                              <span className="font-semibold text-stone-700">
+                                {chaluGiven
+                                  ? `${formatMoney(chaluGiven.amount_paise)} (${formatDateShort(chaluGiven.date)})`
+                                  : (emp.opening_chalu_paise ?? 0) > 0
+                                    ? `${formatMoney(emp.opening_chalu_paise ?? 0)} (Opening)`
+                                    : '—'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400">Last paid:</span>
+                              <span className="font-semibold text-stone-700">
+                                {chaluPaid
+                                  ? `${formatMoney(chaluPaid.amount_paise)} (${formatDateShort(chaluPaid.date)})`
+                                  : '—'}
+                              </span>
+                            </div>
                           </div>
                         </div>
 
-                        {/* Moto Cut */}
-                        <div className="flex items-center justify-between gap-1">
-                          <div>
-                            <div className="text-[11px] font-bold text-amber-950">Main Loan:</div>
-                            <div className="text-[10px] text-stone-500 tabular-nums">
-                              Bal: {c ? formatMoney(c.moto_balance_paise) : '0'}
+                        {/* Main Loan Card */}
+                        <div className="rounded-lg border border-purple-200/90 bg-white p-2 shadow-2xs">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-black text-purple-950">Main Loan</span>
+                              <span className="rounded bg-purple-50 text-purple-900 border border-purple-200 px-1.5 py-0.2 text-[10px] font-extrabold tabular-nums">
+                                Bal: {c ? formatMoney(c.moto_balance_paise) : '₹0'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] text-stone-400 font-medium">Cut:</span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={inp.mr}
+                                onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
+                                className="h-6.5 w-18 px-1.5 text-right font-black text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                              />
+                              {c && c.moto_balance_paise > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const crVal = parseMoneyInput(inp.cr)
+                                    const maxVal = Math.min(
+                                      c.moto_balance_paise,
+                                      Math.max(0, c.total_due_paise - crVal),
+                                    )
+                                    setRowField(emp.id, 'mr', (maxVal / 100).toString())
+                                  }}
+                                  className="text-[9px] font-bold text-purple-900 hover:bg-purple-100 px-1.5 py-0.5 rounded border border-purple-300 bg-purple-50 cursor-pointer"
+                                  title="Deduct maximum possible"
+                                >
+                                  Max
+                                </button>
+                              )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="0"
-                              value={inp.mr}
-                              onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
-                              className="h-7 w-20 px-1.5 text-right font-black text-xs rounded border border-amber-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
-                            />
-                            {c && c.moto_balance_paise > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const crVal = parseMoneyInput(inp.cr)
-                                  const maxVal = Math.min(
-                                    c.moto_balance_paise,
-                                    Math.max(0, c.total_due_paise - crVal),
-                                  )
-                                  setRowField(emp.id, 'mr', (maxVal / 100).toString())
-                                }}
-                                className="text-[10px] font-bold text-amber-800 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 bg-white"
-                                title="Deduct maximum possible"
-                              >
-                                Max
-                              </button>
-                            )}
+
+                          {/* Last Taken & Last Paid Context */}
+                          <div className="flex flex-wrap items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 gap-1 text-stone-500">
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400">Last taken:</span>
+                              <span className="font-semibold text-stone-700">
+                                {motoGiven
+                                  ? `${formatMoney(motoGiven.amount_paise)} (${formatDateShort(motoGiven.date)})`
+                                  : (emp.opening_moto_paise ?? 0) > 0
+                                    ? `${formatMoney(emp.opening_moto_paise ?? 0)} (Opening)`
+                                    : '—'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400">Last paid:</span>
+                              <span className="font-semibold text-stone-700">
+                                {motoPaid
+                                  ? `${formatMoney(motoPaid.amount_paise)} (${formatDateShort(motoPaid.date)})`
+                                  : '—'}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
 
-                      <div className="border-t border-amber-200 pt-1 flex justify-between font-extrabold text-amber-900">
+                      <div className="border-t border-stone-200 pt-1 flex justify-between font-extrabold text-stone-900">
                         <span>Total Deducted:</span>
-                        <span className="tabular-nums">
+                        <span className="tabular-nums text-amber-900">
                           -{formatMoney(c ? c.chalu_recovery_paise + c.moto_recovery_paise : 0)}
                         </span>
                       </div>
