@@ -554,6 +554,13 @@ export default function PayoutScreen({
                 .filter((u) => !u.voided && u.bucket === 'moto' && (u.kind === 'recovery' || u.kind === 'returned'))
                 .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
 
+              const fullCount = c ? c.day_breakdown.filter((d) => d.status === 'full').length : 0
+              const halfCount = c ? c.day_breakdown.filter((d) => d.status === 'half').length : 0
+              const absentCount = c ? c.day_breakdown.filter((d) => d.status === 'absent').length : 0
+              const cycleDays = c ? c.day_breakdown.length : 0
+              const daysWorked = fullCount + halfCount * 0.5
+              const otMins = c ? c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0) : 0
+
               const handleQuickSettle = () => {
                 if (!c) return
                 const crVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
@@ -606,35 +613,27 @@ export default function PayoutScreen({
                         <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-bold text-stone-600">
                           ₹{emp.daily_rate_paise / 100}/d
                         </span>
-                        {c && c.day_breakdown.length > 0 && (() => {
-                          const fullCount = c.day_breakdown.filter((d) => d.status === 'full').length
-                          const halfCount = c.day_breakdown.filter((d) => d.status === 'half').length
-                          const absentCount = c.day_breakdown.filter((d) => d.status === 'absent').length
-                          const cycleDays = c.day_breakdown.length
-                          const daysWorked = fullCount + halfCount * 0.5
-                          const otMins = c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0)
-                          return (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-[4px] bg-stone-100 px-1.5 py-0.5 text-[10px] font-bold text-stone-700 tracking-tight"
-                              title={`Cycle ${cycleDays} days: ${fullCount} Present, ${halfCount} Half, ${absentCount} Absent, ${formatHours(otMins)} Overtime`}
-                            >
-                              <span className="text-stone-900 font-extrabold">{daysWorked}/{cycleDays}d</span>
-                              <span className="text-stone-300">·</span>
-                              <span className="text-emerald-700">{fullCount}P</span>
-                              {halfCount > 0 && <span className="text-amber-700">{halfCount}H</span>}
-                              {absentCount > 0 && <span className="text-rose-700">{absentCount}A</span>}
-                              {otMins > 0 && (
-                                <>
-                                  <span className="text-stone-300">·</span>
-                                  <span className="text-teal-800 font-black">+{formatHours(otMins)} OT</span>
-                                </>
-                              )}
-                            </span>
-                          )
-                        })()}
+                        {c && c.day_breakdown.length > 0 && (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[9.5px] font-bold text-stone-700 tracking-tight"
+                            title={`Cycle ${cycleDays} days: ${fullCount} Present, ${halfCount} Half, ${absentCount} Absent, ${formatHours(otMins)} Overtime`}
+                          >
+                            <span className="text-stone-900 font-extrabold">{daysWorked}/{cycleDays}d</span>
+                            <span className="text-stone-300">·</span>
+                            <span className="text-emerald-700">{fullCount}P</span>
+                            {halfCount > 0 && <span className="text-amber-700">{halfCount}H</span>}
+                            {absentCount > 0 && <span className="text-rose-700">{absentCount}A</span>}
+                            {otMins > 0 && (
+                              <>
+                                <span className="text-stone-300">·</span>
+                                <span className="text-teal-800 font-black">+{formatHours(otMins)} OT</span>
+                              </>
+                            )}
+                          </span>
+                        )}
                       </button>
 
-                      {/* Daily Attendance Pills: Seamless Notion tag style */}
+                      {/* Daily Attendance Pills: Softer, smaller Notion pill badges with status dot */}
                       {c && c.day_breakdown.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1 pl-1.5 border-l border-stone-200">
                           {c.day_breakdown.map((d) => {
@@ -657,26 +656,33 @@ export default function PayoutScreen({
                                 type="button"
                                 onClick={() => setInspectingWorkerId(emp.id)}
                                 className={clsx(
-                                  'inline-flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] leading-tight transition-colors cursor-pointer select-none',
-                                  isFull && !hasOt && 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100',
-                                  isFull && hasOt && 'bg-emerald-100/90 text-emerald-950 hover:bg-emerald-200/90',
-                                  isHalf && 'bg-amber-50 text-amber-900 hover:bg-amber-100',
-                                  isAbsent && 'bg-rose-50 text-rose-800 hover:bg-rose-100',
-                                  !isFull && !isHalf && !isAbsent && 'bg-stone-100 text-stone-500 hover:bg-stone-200',
+                                  'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none border transition-all cursor-pointer select-none',
+                                  isFull && !hasOt && 'bg-emerald-50/70 text-emerald-800 border-emerald-200/60 hover:bg-emerald-100/70',
+                                  isFull && hasOt && 'bg-emerald-100/60 text-emerald-900 border-emerald-300/60 hover:bg-emerald-100',
+                                  isHalf && 'bg-amber-50/70 text-amber-800 border-amber-200/60 hover:bg-amber-100/70',
+                                  isAbsent && 'bg-rose-50/70 text-rose-700 border-rose-200/60 hover:bg-rose-100/70',
+                                  !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-400 border-stone-200/60 hover:bg-stone-100',
                                 )}
                                 title={`${d.date}: ${isFull ? 'Present' : isHalf ? 'Half day' : isAbsent ? 'Absent' : 'Unmarked'}${hasOt ? ` (+${formatHours(d.ot_minutes)} OT)` : ''}`}
                               >
-                                <span className="text-stone-400 font-normal text-[9.5px]">{dateLabel}</span>
                                 <span
                                   className={clsx(
-                                    'font-bold',
-                                    isFull ? 'text-emerald-800' : isHalf ? 'text-amber-800' : isAbsent ? 'text-rose-800' : 'text-stone-400'
+                                    'w-1.5 h-1.5 rounded-full shrink-0',
+                                    isFull
+                                      ? hasOt
+                                        ? 'bg-emerald-600'
+                                        : 'bg-emerald-500'
+                                      : isHalf
+                                        ? 'bg-amber-500'
+                                        : isAbsent
+                                          ? 'bg-rose-400'
+                                          : 'bg-stone-300',
                                   )}
-                                >
-                                  {statusLetter}
-                                </span>
+                                />
+                                <span className="text-stone-400 font-normal">{dateLabel}</span>
+                                <span className="font-bold">{statusLetter}</span>
                                 {hasOt && (
-                                  <span className="font-extrabold text-emerald-800 text-[9px] tabular-nums">
+                                  <span className="font-black text-emerald-700 text-[8.5px] tabular-nums">
                                     {otText}
                                   </span>
                                 )}
@@ -723,63 +729,108 @@ export default function PayoutScreen({
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 text-xs">
                     {/* Block 1: Work & Owed (Earnings) */}
                     <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-2.5 flex flex-col justify-between space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-stone-500 border-b border-stone-200/60 pb-1">
+                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-stone-600 border-b border-stone-200/80 pb-1">
                         <span>1. Earnings & Carry (કમાણી)</span>
-                        <span>{c ? `${c.day_breakdown.length} days` : '0d'}</span>
+                        <span className="font-bold text-stone-700 tabular-nums normal-case text-[11px]">
+                          {c ? `${daysWorked}/${cycleDays}d worked` : '0d'}
+                        </span>
                       </div>
 
-                      <div className="space-y-1">
-                        <div className="flex justify-between">
-                          <span className="text-stone-500">Days Earned:</span>
-                          <span className="font-bold tabular-nums text-stone-900">
-                            {c ? formatMoney(c.earned_paise - c.ot_paise) : '—'}
-                          </span>
-                        </div>
-                        {c && c.ot_paise > 0 && (
-                          <div className="flex justify-between text-teal-800 font-semibold">
-                            <span>Overtime Pay:</span>
-                            <span className="tabular-nums">+{formatMoney(c.ot_paise)}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between">
-                          <span className="text-stone-500">Prior Carry (બાકી):</span>
-                          <span className="font-semibold tabular-nums text-stone-700">
-                            {c ? formatMoney(c.carry_paise) : '—'}
-                          </span>
-                        </div>
-                        {c && c.adjustments_paise !== 0 && (
-                          <div className="flex justify-between">
-                            <span className="text-stone-500">Bonus / Jama (જમા):</span>
-                            <span
-                              className={`font-bold tabular-nums ${
-                                c.adjustments_paise > 0 ? 'text-emerald-700' : 'text-rose-700'
-                              }`}
-                            >
-                              {c.adjustments_paise > 0 ? '+' : ''}
-                              {formatMoney(c.adjustments_paise)}
+                      <div className="space-y-1.5">
+                        {/* Base Wages & Overtime Card */}
+                        <div className="rounded-lg border border-stone-200/90 bg-white p-2 shadow-2xs">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-black text-stone-900">Base Wages</span>
+                              <span className="rounded bg-stone-100 text-stone-600 px-1.5 py-0.2 text-[10px] font-bold tabular-nums">
+                                {daysWorked}d × ₹{emp.daily_rate_paise / 100}
+                              </span>
+                            </div>
+                            <span className="text-xs font-black tabular-nums text-stone-900">
+                              {c ? formatMoney(c.earned_paise - c.ot_paise) : '₹0'}
                             </span>
                           </div>
-                        )}
+
+                          <div className="flex items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 text-stone-500">
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400 font-medium">Overtime:</span>
+                              <span className="font-semibold text-stone-700">
+                                {otMins > 0 ? `${formatHours(otMins)} OT` : 'None (0h)'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400 font-medium">OT Pay:</span>
+                              <span
+                                className={clsx(
+                                  'font-bold tabular-nums',
+                                  (c?.ot_paise ?? 0) > 0 ? 'text-teal-700' : 'text-stone-500',
+                                )}
+                              >
+                                {(c?.ot_paise ?? 0) > 0 ? `+${formatMoney(c!.ot_paise)}` : '₹0'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Prior Carry & Adjustments Card */}
+                        <div className="rounded-lg border border-stone-200/90 bg-white p-2 shadow-2xs">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-black text-stone-900">Prior Carry</span>
+                              <span className="rounded bg-stone-100 text-stone-600 px-1.5 py-0.2 text-[10px] font-bold tabular-nums">
+                                {(c?.carry_paise ?? 0) > 0 ? 'Unpaid bal' : 'Nil'}
+                              </span>
+                            </div>
+                            <span className="text-xs font-black tabular-nums text-stone-900">
+                              {c ? formatMoney(c.carry_paise) : '₹0'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 text-stone-500">
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400 font-medium">Bonus / Jama:</span>
+                              <span
+                                className={clsx(
+                                  'font-bold tabular-nums',
+                                  (c?.adjustments_paise ?? 0) > 0
+                                    ? 'text-emerald-700'
+                                    : (c?.adjustments_paise ?? 0) < 0
+                                      ? 'text-rose-700'
+                                      : 'text-stone-500',
+                                )}
+                              >
+                                {(c?.adjustments_paise ?? 0) > 0 ? '+' : ''}
+                                {c ? formatMoney(c.adjustments_paise) : '₹0'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-stone-400 font-medium">Status:</span>
+                              <span className="font-semibold text-stone-600">
+                                {(c?.carry_paise ?? 0) > 0 ? 'Carried' : 'Normal'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
                       <div className="border-t border-stone-200 pt-1 flex justify-between font-extrabold text-stone-900">
                         <span>Gross Due (કુલ લેણાં):</span>
-                        <span className="tabular-nums text-sm">
+                        <span className="tabular-nums text-sm font-black text-stone-900">
                           {c ? formatMoney(c.total_due_paise) : '—'}
                         </span>
                       </div>
                     </div>
 
                     {/* Block 2: Loan Deductions (Upad) */}
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-2.5 flex flex-col justify-between space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-stone-600 border-b border-stone-200/80 pb-1">
+                    <div className="rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/60 via-amber-50/30 to-amber-50/20 p-2.5 flex flex-col justify-between space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-200/70 pb-1">
                         <span>2. Loan Deductions (ઉપાડ કપાત)</span>
                         <span
                           className={clsx(
                             'font-bold tabular-nums normal-case text-[11px] px-1.5 py-0.2 rounded',
                             c && c.chalu_after_paise + c.moto_after_paise > 0
                               ? 'bg-amber-100 text-amber-900'
-                              : 'bg-stone-100 text-stone-500',
+                              : 'bg-white/80 text-stone-500 border border-stone-200/60',
                           )}
                           title={`Chalu: ${formatMoney(c ? c.chalu_after_paise : 0)} + Main: ${formatMoney(c ? c.moto_after_paise : 0)}`}
                         >
@@ -909,9 +960,9 @@ export default function PayoutScreen({
                         </div>
                       </div>
 
-                      <div className="border-t border-stone-200 pt-1 flex justify-between font-extrabold text-stone-900">
+                      <div className="border-t border-amber-200/80 pt-1 flex justify-between font-extrabold text-stone-900">
                         <span>Total Deducted:</span>
-                        <span className="tabular-nums text-amber-900">
+                        <span className="tabular-nums text-amber-900 font-black">
                           -{formatMoney(c ? c.chalu_recovery_paise + c.moto_recovery_paise : 0)}
                         </span>
                       </div>
