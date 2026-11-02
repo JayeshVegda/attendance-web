@@ -17,7 +17,11 @@ export const DEFAULT_SETTINGS: SettingsMap = {
 }
 
 export function settingValue(settings: SettingsMap, key: string): string {
-  return settings[key] ?? DEFAULT_SETTINGS[key] ?? ''
+  const val = settings[key] ?? DEFAULT_SETTINGS[key] ?? ''
+  if (typeof val === 'object' && val !== null && 'value' in (val as unknown as Record<string, unknown>)) {
+    return String((val as unknown as Record<string, unknown>).value ?? '')
+  }
+  return typeof val === 'string' ? val : String(val ?? '')
 }
 
 export function otDivisor(settings?: SettingsMap): number {
