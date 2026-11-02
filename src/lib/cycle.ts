@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { addDays, dateKey } from './dates'
 import { formatMoney } from './money'
-import type { PayoutRun, SettingsMap } from './types'
+import type { Employee, PayoutRun, SettingsMap, Statement } from './types'
 
 export const DEFAULT_SETTINGS: SettingsMap = {
   first_cycle_start: '2026-10-01',
@@ -177,9 +177,17 @@ export function hourStepMinutes(settings?: SettingsMap): number {
   return parsed === 60 ? 60 : 30
 }
 
+export function isRealPayoutRun(run?: Partial<PayoutRun> | null): boolean {
+  if (!run || run.voided) return false
+  return run.status === 'completed' || run.status === 'closed'
+}
+
+export function realPayoutRuns(runs: PayoutRun[]): PayoutRun[] {
+  return runs.filter((r) => isRealPayoutRun(r))
+}
+
 export function lastClosedRun(runs: PayoutRun[]): PayoutRun | undefined {
-  return [...runs]
-    .filter((run) => run.status === 'closed' && !run.voided)
+  return realPayoutRuns(runs)
     .sort((a, b) => dateKey(b.payout_date).localeCompare(dateKey(a.payout_date)))[0]
 }
 
@@ -192,6 +200,77 @@ export function cycleStartFor(runs: PayoutRun[], settings: SettingsMap): string 
   const last = lastPayoutDate(runs)
   if (last) return addDays(last, 1)
   return settingValue(settings, 'first_cycle_start') || '2026-10-01'
+}
+
+/**
+ * For a specific worker, finds their paid-up-to date based on their latest
+ * non-voided completed statement. Returns dateKey string or undefined.
+ */
+export function getWorkerPaidUpToDate(
+  employeeId: string,
+  statements: Statement[],
+): string | undefined {
+  const workerStmts = statements
+    .filter((s) => s.employee === employeeId && !s.voided && s.payout_date)
+    .sort((a, b) => {
+      const dCmp = dateKey(b.payout_date).localeCompare(dateKey(a.payout_date))
+      if (dCmp !== 0) return dCmp
+      return (b.created || '').localeCompare(a.created || '')
+    })
+  return workerStmts[0] ? dateKey(workerStmts[0].payout_date) : undefined
+}
+
+/**
+ * Computes the open cycle grid start date:
+ * The earliest paid-up-to day + 1 among ACTIVE workers
+ * (each worker's own last non-voided completed statement date),
+ * or first_cycle_start setting if nobody has been paid yet.
+ * Inactive workers (e.g. Prakash) never pull the grid start back.
+ */
+export function computeGridStart(args: {
+  activeEmployees: Employee[]
+  statements: Statement[]
+  settings?: SettingsMap
+  firstCycleStart?: string
+}): string {
+  const { activeEmployees, statements, settings } = args
+  const fallback =
+    args.firstCycleStart ||
+    (settings ? settingValue(settings, 'first_cycle_start') : '') ||
+    '2026-10-01'
+
+  if (!activeEmployees.length) return fallback
+
+  const latestByEmp = new Map<string, Statement>()
+  for (const s of statements) {
+    if (s.voided || !s.payout_date) continue
+    const curr = latestByEmp.get(s.employee)
+    if (!curr) {
+      latestByEmp.set(s.employee, s)
+      continue
+    }
+    const currDate = dateKey(curr.payout_date)
+    const nextDate = dateKey(s.payout_date)
+    if (nextDate > currDate || (nextDate === currDate && (s.created || '') > (curr.created || ''))) {
+      latestByEmp.set(s.employee, s)
+    }
+  }
+
+  const nextUnpaidDates: string[] = []
+  let hasAnyPaidWorker = false
+
+  for (const emp of activeEmployees) {
+    const stmt = latestByEmp.get(emp.id)
+    if (stmt && stmt.payout_date) {
+      hasAnyPaidWorker = true
+      nextUnpaidDates.push(addDays(dateKey(stmt.payout_date), 1))
+    }
+  }
+
+  if (!hasAnyPaidWorker || !nextUnpaidDates.length) return fallback
+
+  nextUnpaidDates.sort()
+  return nextUnpaidDates[0]
 }
 
 export function suggestedPayoutDate(start: string, today: string): string {

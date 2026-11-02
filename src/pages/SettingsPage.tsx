@@ -28,6 +28,7 @@ import {
   isChaluUpadEnabled,
   isMotoUpadEnabled,
   isHoursAttendanceEnabled,
+  isRealPayoutRun,
   hourStepMinutes as getHourStepMinutes,
 } from '../lib/cycle'
 import { pb } from '../lib/pb'
@@ -559,7 +560,7 @@ export default function SettingsPage() {
               <div className="flex justify-between">
                 <span>Closed Payouts:</span>
                 <span className="font-extrabold text-stone-900">
-                  {(runsQuery.data ?? []).filter((run) => run.status === 'closed').length}
+                  {(runsQuery.data ?? []).filter(isRealPayoutRun).length}
                 </span>
               </div>
               <div className="flex justify-between border-t border-stone-200/80 pt-2 text-[11px] text-stone-500">

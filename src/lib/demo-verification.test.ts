@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pb } from './pb'
 import { loadWorkerContexts, buildPreview } from './payout-service'
+import type { Attendance, UpadEntry } from './types'
 
 describe('Demo Database Re-Seed Verification', () => {
   it('verifies all 14 workers and edge cases on live pocketbase without mutating data', async ({ skip }) => {
@@ -16,8 +17,8 @@ describe('Demo Database Re-Seed Verification', () => {
     const contexts = await loadWorkerContexts()
     expect(contexts).toHaveLength(14)
 
-    const attendance = await pb.collection('attendance').getFullList({ sort: 'date' })
-    const upads = await pb.collection('upad_entries').getFullList({ sort: 'date' })
+    const attendance = await pb.collection('attendance').getFullList<Attendance>({ sort: 'date' })
+    const upads = await pb.collection('upad_entries').getFullList<UpadEntry>({ sort: 'date' })
     const preview = buildPreview(contexts, '2026-11-02', {}, attendance)
     expect(preview).toHaveLength(14)
 

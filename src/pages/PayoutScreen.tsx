@@ -35,7 +35,7 @@ import {
   X,
 } from 'lucide-react'
 import { getSettings, listRuns } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled, useUpadBuckets } from '../lib/cycle'
+import { isChaluUpadEnabled, isMotoUpadEnabled, isRealPayoutRun, lastClosedRun, useUpadBuckets } from '../lib/cycle'
 import { pb } from '../lib/pb'
 import type { Attendance } from '../lib/types'
 
@@ -327,7 +327,7 @@ export default function PayoutScreen({
   const denoms = useMemo(() => calculateDenominations(totals.cashToHand), [totals.cashToHand])
 
   // Payout reminder
-  const latestRun = runsQuery.data?.find((r) => r.status === 'closed' && !r.voided)
+  const latestRun = runsQuery.data ? lastClosedRun(runsQuery.data) : undefined
   const daysSinceLastPayout = latestRun
     ? Math.max(0, daysBetweenInclusive(latestRun.payout_date, todayKey()) - 1)
     : null

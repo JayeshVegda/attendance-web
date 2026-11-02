@@ -8,6 +8,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ChevronDown,
+  Clock,
   Coins,
   HandCoins,
   History,
@@ -33,10 +34,24 @@ import {
   getSettings,
   listEmployees,
   listRuns,
+  listStatements,
   saveAttendance,
 } from '../lib/api'
 import { saveCycleRows } from '../lib/payout-service'
-import { cycleStartFor, isChaluUpadEnabled, isMotoUpadEnabled, isHoursAttendanceEnabled, hourStepMinutes, lastPayoutDate, otDivisor, useUpadBuckets } from '../lib/cycle'
+import {
+  computeGridStart,
+  getWorkerPaidUpToDate,
+  isRealPayoutRun,
+  realPayoutRuns,
+  cycleStartFor,
+  isChaluUpadEnabled,
+  isMotoUpadEnabled,
+  isHoursAttendanceEnabled,
+  hourStepMinutes,
+  lastPayoutDate,
+  otDivisor,
+  useUpadBuckets,
+} from '../lib/cycle'
 import {
   addDays,
   dateKey,
@@ -181,6 +196,8 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const [filterType, setFilterType] = useState<'all' | 'active' | 'unmarkedToday'>('all')
   const [bulkMenuDate, setBulkMenuDate] = useState<string | null>(null)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
+  const [selectedCycleId, setSelectedCycleId] = useState<string>('open')
+  const [lateEntriesTarget, setLateEntriesTarget] = useState<{ employee: Employee; entries: Attendance[] } | null>(null)
   const bulkMenuRef = useRef<HTMLDivElement>(null)
 
   const [coarsePointer] = useState(
@@ -192,17 +209,41 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: listRuns })
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
+  const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
 
-  const cycleStart =
-    settingsQuery.data && runsQuery.isSuccess
-      ? cycleStartFor(runsQuery.data ?? [], settingsQuery.data)
-      : ''
+  const completedRuns = useMemo(
+    () => realPayoutRuns(runsQuery.data ?? []).sort((a, b) => dateKey(b.payout_date).localeCompare(dateKey(a.payout_date))),
+    [runsQuery.data],
+  )
 
-  const validRange = Boolean(cycleStart && payoutDate && cycleStart <= payoutDate)
-  const payrollKey = ['payroll', cycleStart, payoutDate] as const
+  const activeEmployees = useMemo(
+    () => (employeesQuery.data ?? []).filter((e) => e.active),
+    [employeesQuery.data],
+  )
+
+  const openCycleStart = useMemo(() => {
+    if (!settingsQuery.data) return ''
+    return computeGridStart({
+      activeEmployees,
+      statements: statementsQuery.data ?? [],
+      settings: settingsQuery.data,
+    })
+  }, [activeEmployees, statementsQuery.data, settingsQuery.data])
+
+  const selectedRun = useMemo(
+    () => (selectedCycleId === 'open' ? null : completedRuns.find((r) => r.id === selectedCycleId)),
+    [selectedCycleId, completedRuns],
+  )
+
+  const isPastCycle = Boolean(selectedRun)
+  const cycleStart = selectedRun ? dateKey(selectedRun.cycle_start) : openCycleStart
+  const gridEndDate = selectedRun ? dateKey(selectedRun.payout_date) : payoutDate
+
+  const validRange = Boolean(cycleStart && gridEndDate && cycleStart <= gridEndDate)
+  const payrollKey = ['payroll', cycleStart, gridEndDate] as const
   const payrollQuery = useQuery({
     queryKey: payrollKey,
-    queryFn: () => getPayrollData(cycleStart, payoutDate),
+    queryFn: () => getPayrollData(cycleStart, gridEndDate),
     enabled: validRange,
   })
 
@@ -211,7 +252,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
     setPreviewOpen(false)
     setCashTarget(null)
     setNote('')
-  }, [cycleStart, payoutDate])
+  }, [cycleStart, gridEndDate])
 
   // Close bulk menu when clicking outside
   useEffect(() => {
@@ -239,9 +280,9 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
 
   const days = useMemo(() => {
     if (!validRange) return []
-    const length = Math.max(1, daysBetweenInclusive(cycleStart, payoutDate))
+    const length = Math.max(1, daysBetweenInclusive(cycleStart, gridEndDate))
     return Array.from({ length }, (_, index) => addDays(cycleStart, index))
-  }, [validRange, cycleStart, payoutDate])
+  }, [validRange, cycleStart, gridEndDate])
 
   const attendanceMap = useMemo(() => {
     const map = new Map<string, Attendance>()
@@ -251,11 +292,36 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
 
   const baseRows = useMemo(() => {
     if (!payrollData) return []
-    return buildCycleRows(payrollData, cycleStart, payoutDate)
-  }, [payrollData, cycleStart, payoutDate])
+    return buildCycleRows(payrollData, cycleStart, gridEndDate)
+  }, [payrollData, cycleStart, gridEndDate])
 
   const rows = useMemo(() => adjustRows(baseRows, entries), [baseRows, entries])
   const today = todayKey()
+
+  const workerPaidUpToMap = useMemo(() => {
+    const map = new Map<string, string>()
+    const stmts = statementsQuery.data ?? payrollData?.statements ?? []
+    for (const emp of employees) {
+      const paidDate = getWorkerPaidUpToDate(emp.id, stmts)
+      if (paidDate) map.set(emp.id, paidDate)
+    }
+    return map
+  }, [employees, statementsQuery.data, payrollData?.statements])
+
+  const workerLateEntriesMap = useMemo(() => {
+    const map = new Map<string, Attendance[]>()
+    if (isPastCycle || !cycleStart) return map
+    for (const entry of attendance) {
+      if (entry.settled_payout) continue
+      const d = dateKey(entry.date)
+      if (d < cycleStart && (entry.status || (entry.ot_minutes ?? 0) > 0)) {
+        const list = map.get(entry.employee) ?? []
+        list.push(entry)
+        map.set(entry.employee, list)
+      }
+    }
+    return map
+  }, [attendance, cycleStart, isPastCycle])
 
   // Filtered rows for search & status filter
   const displayRows = useMemo(() => {
@@ -317,18 +383,24 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
       let present = 0
       let half = 0
       let absent = 0
+      let hours = 0
       let ot = 0
       for (const row of rows) {
+        if (!isPastCycle) {
+          const workerPaidUpTo = workerPaidUpToMap.get(row.employee.id)
+          if (workerPaidUpTo && day <= workerPaidUpTo) continue
+        }
         const record = attendanceMap.get(keyFor(row.employee.id, day))
         if (!record) continue
         if (record.status === 'full') present += 1
         else if (record.status === 'half') half += 1
         else if (record.status === 'absent') absent += 1
+        else if (record.status === 'hours') hours += 1
         ot += record.ot_minutes || 0
       }
-      return { present, half, absent, ot }
+      return { present, half, absent, hours, ot }
     })
-  }, [days, rows, attendanceMap])
+  }, [days, rows, attendanceMap, workerPaidUpToMap, isPastCycle])
 
   // Today's attendance quick stats
   const todayStats = useMemo(() => {
@@ -1028,32 +1100,80 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           <>
             {/* Step 1 Header Banner */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-emerald-200 bg-gradient-to-r from-emerald-50 via-teal-50 to-stone-50 px-4 py-3 text-xs">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md bg-emerald-700 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white">
-                    Step 1: Check Attendance
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={clsx(
+                    'rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white',
+                    isPastCycle ? 'bg-stone-600' : 'bg-emerald-700'
+                  )}>
+                    {isPastCycle ? 'Viewing History' : 'Step 1: Check Attendance'}
                   </span>
+
+                  {/* Previous Cycles Dropdown Selector */}
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={selectedCycleId}
+                      onChange={(e) => setSelectedCycleId(e.target.value)}
+                      aria-label="Select attendance cycle"
+                      className="rounded-lg border border-stone-300 bg-white px-2 py-1 text-xs font-bold text-stone-800 shadow-2xs focus:border-emerald-500 focus:outline-none cursor-pointer"
+                    >
+                      <option value="open">
+                        🟢 Open Cycle ({formatDateShort(openCycleStart)} – {formatDateShort(payoutDate)})
+                      </option>
+                      {completedRuns.map((run) => (
+                        <option key={run.id} value={run.id}>
+                          🔒 Closed: {formatDateShort(run.cycle_start)} – {formatDateShort(run.payout_date)} {run.note ? `(${run.note})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <span className="font-extrabold text-stone-900">
-                    Cycle {formatDateRange(cycleStart, payoutDate)}
+                    Cycle {formatDateRange(cycleStart, gridEndDate)}
                   </span>
-                  {lastPayout && (
+
+                  {!isPastCycle && lastPayout && (
                     <span className="text-[11px] text-stone-500 font-medium hidden sm:inline">
                       · Last payout closed {formatDateShort(lastPayout)}
                     </span>
                   )}
+                  {isPastCycle && (
+                    <span className="rounded bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 text-[10px] font-bold">
+                      Read-only
+                    </span>
+                  )}
                 </div>
-                <div className="mt-1 flex items-center gap-2 text-[11px] text-stone-600">
-                  <span>Verify marks below. Unmarked days are highlighted. When attendance is verified, proceed to Step 2.</span>
+                <div className="flex items-center gap-2 text-[11px] text-stone-600">
+                  {isPastCycle ? (
+                    <span>Viewing attendance records from a past closed cycle. All records are locked for audit.</span>
+                  ) : (
+                    <span>Verify marks below. Unmarked days are highlighted. When attendance is verified, proceed to Step 2.</span>
+                  )}
                 </div>
               </div>
-              <Button
-                size="sm"
-                onClick={() => onNavigate('payout')}
-                className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold shrink-0 shadow-xs"
-              >
-                <span>Issue Payout (Step 2)</span>
-                <ArrowRight className="h-3.5 w-3.5 ml-1" />
-              </Button>
+
+              <div className="flex items-center gap-2">
+                {isPastCycle ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setSelectedCycleId('open')}
+                    className="font-bold shrink-0 shadow-xs"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                    <span>Back to Open Cycle</span>
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => onNavigate('payout')}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold shrink-0 shadow-xs"
+                  >
+                    <span>Issue Payout (Step 2)</span>
+                    <ArrowRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                )}
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -1244,6 +1364,28 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                                 </>
                               )}
                             </div>
+
+                            {/* Late entries chip (unpaid marks older than grid start) */}
+                            {(() => {
+                              const lateEntries = workerLateEntriesMap.get(employee.id) || []
+                              if (lateEntries.length === 0) return null
+                              return (
+                                <div className="mt-1">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setLateEntriesTarget({ employee, entries: lateEntries })
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100 shadow-2xs transition select-none cursor-pointer"
+                                    title={`${lateEntries.length} unpaid late attendance marks from before this cycle`}
+                                  >
+                                    <Clock className="h-2.5 w-2.5 text-amber-600" />
+                                    <span>{lateEntries.length} late {lateEntries.length === 1 ? 'entry' : 'entries'}</span>
+                                  </button>
+                                </div>
+                              )
+                            })()}
                           </div>
                         </button>
                       </td>
@@ -1256,7 +1398,10 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                           const hasOt = record && record.ot_minutes > 0
                           const isFri = isFriday(day)
                           const isSettled = Boolean(record?.settled_payout)
-                          const isUnmarked = !record?.status && day <= today && employee.active && (!employee.joined_on || employee.joined_on <= day)
+                          const workerPaidUpTo = workerPaidUpToMap.get(employee.id)
+                          const isPriorPaid = !isPastCycle && Boolean(workerPaidUpTo && day <= workerPaidUpTo)
+                          const isCellLocked = isSettled || isPriorPaid || isPastCycle
+                          const isUnmarked = !isCellLocked && !record?.status && day <= today && employee.active && (!employee.joined_on || employee.joined_on <= day)
 
                           return (
                             <td
@@ -1264,17 +1409,26 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                               className={clsx(
                                 'border-b border-l border-stone-100 p-1 text-center',
                                 isFri && !record && 'bg-amber-50/20',
+                                isPriorPaid && 'bg-stone-50/60',
                               )}
                             >
                               <div className="group relative">
-                                {isSettled ? (
+                                {isCellLocked ? (
                                   <button
                                     type="button"
                                     disabled
-                                    title={`Settled in payout on ${formatDateShort(day)}. Locked.`}
+                                    title={
+                                      isPriorPaid
+                                        ? `Paid in prior payout (paid up to ${formatDateShort(workerPaidUpTo!)}). Locked.`
+                                        : isPastCycle
+                                          ? `Closed cycle on ${formatDateShort(day)}. Read-only.`
+                                          : `Settled in payout on ${formatDateShort(day)}. Locked.`
+                                    }
                                     className={clsx(
-                                      'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold select-none opacity-80 cursor-not-allowed',
-                                      cellStyle(record?.status),
+                                      'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold select-none cursor-not-allowed',
+                                      isPriorPaid
+                                        ? 'bg-stone-100/90 text-stone-400 border-stone-200/80 opacity-60'
+                                        : clsx(cellStyle(record?.status), 'opacity-80'),
                                     )}
                                   >
                                     <span className="text-xs font-bold leading-tight flex items-center gap-0.5">
@@ -1321,7 +1475,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                                 )}
 
                                 {/* Hover Pencil Edit Button */}
-                                {!isSettled && (
+                                {!isCellLocked && (
                                   <button
                                     type="button"
                                     onClick={(event) => {
@@ -1847,6 +2001,78 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               >
                 Clear Today
               </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {/* Late Entries Modal */}
+      {lateEntriesTarget && (
+        <Modal
+          open={Boolean(lateEntriesTarget)}
+          onClose={() => setLateEntriesTarget(null)}
+          title={`${lateEntriesTarget.employee.name} — Late Attendance Entries`}
+          description={`Unpaid attendance marks recorded prior to this cycle (${formatDateRange(cycleStart, gridEndDate)}). These will automatically be settled in the next payout.`}
+          size="md"
+          footer={
+            <div className="flex justify-end w-full">
+              <Button variant="secondary" onClick={() => setLateEntriesTarget(null)}>
+                Close
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-900">
+              These dates are from before the open cycle grid. They flow into the worker&apos;s gross due at payout as <code className="font-mono font-bold text-amber-950">lateRows</code>. Click <strong>Edit</strong> to modify status, overtime, or clear any entry.
+            </div>
+            <div className="divide-y divide-stone-100 rounded-xl border border-stone-200 bg-white overflow-hidden">
+              {lateEntriesTarget.entries.map((entry) => {
+                const dayStr = dateKey(entry.date)
+                const rate = getRateForDate(lateEntriesTarget.employee, rates, dayStr)
+                return (
+                  <div key={entry.id} className="flex items-center justify-between p-3 text-xs hover:bg-stone-50 transition">
+                    <div>
+                      <div className="font-bold text-stone-900 flex items-center gap-1.5">
+                        <span>{formatDateLong(dayStr)}</span>
+                        <span className="text-stone-400 font-normal">({weekdayShort(dayStr)})</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className={clsx(
+                          'rounded-md px-1.5 py-0.5 font-bold uppercase text-[10px]',
+                          entry.status === 'full' ? 'bg-emerald-100 text-emerald-800' :
+                          entry.status === 'half' ? 'bg-amber-100 text-amber-800' :
+                          entry.status === 'hours' ? 'bg-sky-100 text-sky-800' : 'bg-rose-100 text-rose-800'
+                        )}>
+                          {formatAttendanceLabel(entry)}
+                        </span>
+                        {entry.ot_minutes > 0 && (
+                          <span className="rounded-md bg-emerald-50 text-emerald-800 border border-emerald-300 px-1.5 py-0.2 font-semibold">
+                            +{formatHours(entry.ot_minutes)} OT
+                          </span>
+                        )}
+                        <span className="text-stone-500 font-medium">Rate: {formatMoney(rate)}/d</span>
+                        {entry.note && (
+                          <span className="text-stone-400 italic">"{entry.note}"</span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => {
+                        const targetEmp = lateEntriesTarget.employee
+                        const targetDate = dayStr
+                        setLateEntriesTarget(null)
+                        setEditor({ employeeId: targetEmp.id, date: targetDate })
+                      }}
+                      className="font-bold text-xs"
+                    >
+                      <Pencil className="h-3 w-3 mr-1" />
+                      <span>Edit</span>
+                    </Button>
+                  </div>
+                )
+              })}
             </div>
           </div>
         </Modal>
