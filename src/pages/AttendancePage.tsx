@@ -36,7 +36,7 @@ import {
   saveAttendance,
 } from '../lib/api'
 import { saveCycleRows } from '../lib/payout-service'
-import { cycleStartFor, isChaluUpadEnabled, isMotoUpadEnabled, isHoursAttendanceEnabled, hourStepMinutes, lastPayoutDate, otDivisor } from '../lib/cycle'
+import { cycleStartFor, isChaluUpadEnabled, isMotoUpadEnabled, isHoursAttendanceEnabled, hourStepMinutes, lastPayoutDate, otDivisor, useUpadBuckets } from '../lib/cycle'
 import {
   addDays,
   dateKey,
@@ -229,8 +229,9 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const employees = employeesQuery.data ?? payrollData?.employees ?? []
   const payrollSettings = payrollData?.settings ?? settingsQuery.data ?? {}
   const divisor = otDivisor(payrollSettings)
-  const isChaluOn = isChaluUpadEnabled(payrollSettings)
-  const isMotoOn = isMotoUpadEnabled(payrollSettings)
+  const upadConfig = useUpadBuckets(payrollSettings)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
   const isHoursOn = isHoursAttendanceEnabled(payrollSettings)
   const stepMins = hourStepMinutes(payrollSettings)
   const rates = payrollData?.rates ?? []
@@ -765,11 +766,11 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         </span>
                         <span className="text-stone-300">·</span>
                         <span>{Number(row.daysWorked.toFixed(2))}d worked ({formatMoney(row.earnedPaise)})</span>
-                        {hasUpad && row.upadOutstandingPaise > 0 && (
+                        {upadConfig.hasAny && row.upadOutstandingPaise > 0 && (
                           <>
                             <span className="text-stone-300">·</span>
                             <span className="font-semibold text-amber-700">
-                              {formatMoney(row.upadOutstandingPaise)} {isChaluOn && !isMotoOn ? 'chalu' : !isChaluOn && isMotoOn ? 'loan' : 'upad'}
+                              {formatMoney(row.upadOutstandingPaise)} {upadConfig.isOnlyOneOn ? upadConfig.singleBucket!.label.toLowerCase() : 'upad'}
                             </span>
                           </>
                         )}
@@ -1172,9 +1173,11 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                   <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
                     Owed Now
                   </th>
-                  <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Upad Bal
-                  </th>
+                  {upadConfig.hasAny && (
+                    <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
+                      {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Bal` : 'Upad Bal'}
+                    </th>
+                  )}
                   <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-emerald-800">
                     Action
                   </th>
@@ -1229,13 +1232,17 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                               <span className="font-semibold text-stone-700">
                                 {formatMoney(employee.daily_rate_paise)}/d
                               </span>
-                              <span className="text-stone-300">·</span>
-                              <span className={clsx(
-                                'font-semibold',
-                                row.upadOutstandingPaise > 0 ? 'text-amber-700' : 'text-stone-400'
-                              )}>
-                                Upad: {formatMoney(row.upadOutstandingPaise)}
-                              </span>
+                              {upadConfig.hasAny && (
+                                <>
+                                  <span className="text-stone-300">·</span>
+                                  <span className={clsx(
+                                    'font-semibold',
+                                    row.upadOutstandingPaise > 0 ? 'text-amber-700' : 'text-stone-400'
+                                  )}>
+                                    {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label}:` : 'Upad:'} {formatMoney(row.upadOutstandingPaise)}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
                         </button>
@@ -1366,22 +1373,24 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                       </td>
 
                       {/* Upad Button Column */}
-                      <td className="border-b border-l border-stone-100 px-2.5 py-2 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setWorkerUpadTarget(row)}
-                          className={clsx(
-                            'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition border select-none tabular-nums',
-                            row.upadOutstandingPaise > 0
-                              ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 shadow-2xs'
-                              : 'border-stone-200 bg-stone-50/80 text-stone-500 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800',
-                          )}
-                          title={`Manage upad for ${employee.name}`}
-                        >
-                          <HandCoins className="h-3 w-3 text-amber-700" />
-                          <span>{row.upadOutstandingPaise > 0 ? formatMoney(row.upadOutstandingPaise) : '+ Upad'}</span>
-                        </button>
-                      </td>
+                      {upadConfig.hasAny && (
+                        <td className="border-b border-l border-stone-100 px-2.5 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setWorkerUpadTarget(row)}
+                            className={clsx(
+                              'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition border select-none tabular-nums',
+                              row.upadOutstandingPaise > 0
+                                ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 shadow-2xs'
+                                : 'border-stone-200 bg-stone-50/80 text-stone-500 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800',
+                            )}
+                            title={`Manage upad for ${employee.name}`}
+                          >
+                            <HandCoins className="h-3 w-3 text-amber-700" />
+                            <span>{row.upadOutstandingPaise > 0 ? formatMoney(row.upadOutstandingPaise) : `+ ${upadConfig.isOnlyOneOn ? upadConfig.singleBucket!.label : 'Upad'}`}</span>
+                          </button>
+                        </td>
+                      )}
 
                       {/* Pay Worker Action (Navigates to Payout Screen for this worker) */}
                       <td className="border-b border-l border-stone-100 px-3 py-2 text-center">
@@ -1517,21 +1526,23 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             </div>
 
             {/* 3. Upad Status (Recovered & Remaining) */}
-            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-amber-900">
-                Upad Status
+            {upadConfig.hasAny && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                  {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Status` : 'Upad Status'}
+                </div>
+                <div className="mt-1 text-lg font-bold text-amber-950 tabular-nums">
+                  {formatMoney(totals.outstanding, { showZero: true })}
+                </div>
+                <div className="text-xs font-semibold text-rose-700 tabular-nums mt-0.5">
+                  {totals.recovery > 0 ? (
+                    <span>-{formatMoney(totals.recovery)} being recovered</span>
+                  ) : (
+                    <span className="text-stone-500 font-normal">₹0 recovered · {formatMoney(totals.outstanding)} remain</span>
+                  )}
+                </div>
               </div>
-              <div className="mt-1 text-lg font-bold text-amber-950 tabular-nums">
-                {formatMoney(totals.outstanding, { showZero: true })}
-              </div>
-              <div className="text-xs font-semibold text-rose-700 tabular-nums mt-0.5">
-                {totals.recovery > 0 ? (
-                  <span>-{formatMoney(totals.recovery)} being recovered</span>
-                ) : (
-                  <span className="text-stone-500 font-normal">₹0 recovered · {formatMoney(totals.outstanding)} remain</span>
-                )}
-              </div>
-            </div>
+            )}
 
             {/* 4. Adjustments / Carried Balance */}
             <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
@@ -1863,12 +1874,13 @@ function WorkerUpadModal({
   currentRecovery: string
   settings?: SettingsMap
 }) {
-  const isChaluOn = isChaluUpadEnabled(settings)
-  const isMotoOn = isMotoUpadEnabled(settings)
+  const upadConfig = useUpadBuckets(settings)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
   const [mode, setMode] = useState<'give' | 'recover'>('give')
 
   // Give Upad Form
-  const [giveCategory, setGiveCategory] = useState<UpadCategory>(isChaluOn ? 'regular' : 'extra')
+  const [giveCategory, setGiveCategory] = useState<UpadCategory>(upadConfig.singleBucket?.id === 'moto' ? 'extra' : 'regular')
   const [giveAmount, setGiveAmount] = useState('')
   const [giveNote, setGiveNote] = useState('')
   const [giveError, setGiveError] = useState('')
@@ -1985,16 +1997,14 @@ function WorkerUpadModal({
             </div>
           </div>
           <div className="text-right text-xs font-medium text-amber-900/80">
-            {isChaluOn && isMotoOn ? (
+            {upadConfig.isBothOn ? (
               <>
-                <div>Chalu: {formatMoney(row.regularUpadPaise)}</div>
-                {row.extraUpadPaise > 0 && <div>Main: {formatMoney(row.extraUpadPaise)}</div>}
+                <div>{upadConfig.chaluLabel}: {formatMoney(row.regularUpadPaise)}</div>
+                {row.extraUpadPaise > 0 && <div>{upadConfig.motoLabel}: {formatMoney(row.extraUpadPaise)}</div>}
               </>
-            ) : isMotoOn ? (
-              <div>Loan: {formatMoney(row.extraUpadPaise)}</div>
-            ) : (
-              <div>Upad: {formatMoney(row.regularUpadPaise)}</div>
-            )}
+            ) : upadConfig.isOnlyOneOn ? (
+              <div>{upadConfig.singleBucket!.label}: {formatMoney(row.upadOutstandingPaise)}</div>
+            ) : null}
           </div>
         </div>
 
@@ -2530,8 +2540,9 @@ function CashReturnModal({
   payoutDate: string
   settings?: SettingsMap
 }) {
-  const isChaluOn = isChaluUpadEnabled(settings)
-  const isMotoOn = isMotoUpadEnabled(settings)
+  const upadConfig = useUpadBuckets(settings)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
   const effectiveInitial = !isChaluOn ? 'extra' : !isMotoOn ? 'regular' : initialCategory
   const [category, setCategory] = useState<UpadCategory>(effectiveInitial)
   const [amount, setAmount] = useState('')
@@ -2623,7 +2634,7 @@ function CashReturnModal({
                   )}
                 >
                   <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
-                    {value === 'regular' || value === 'chalu' ? 'Chalu Upad' : 'Main Upad'}
+                    {value === 'regular' || value === 'chalu' ? upadConfig.chaluLabel : upadConfig.motoLabel}
                   </div>
                   <div className="mt-0.5 text-base font-black text-stone-900 tabular-nums">
                     {formatMoney(valueBalance, { showZero: true })}
