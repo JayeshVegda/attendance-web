@@ -57,6 +57,7 @@ export type SavePayoutInput = {
   note: string
   rows: { context: WorkerContext; inputs: PayoutInputs }[]
   idempotencyKey?: string
+  options?: { chalu_enabled?: boolean; moto_enabled?: boolean; full_day_minutes?: number }
 }
 
 export function newIdempotencyKey(): string {
@@ -165,6 +166,7 @@ export function contextsFromRaw(args: {
       employee: a.employee,
       date: normDate(a.date),
       status: a.status as DayStatus,
+      worked_minutes: a.worked_minutes,
       ot_minutes: a.ot_minutes ?? 0,
       settled: !!a.settled_payout,
     }))
@@ -300,13 +302,17 @@ export function buildPreview(
   contexts: WorkerContext[],
   cutoff: string,
   inputsByEmployee: Record<string, Partial<PayoutInputs>>,
-  allRawAttendance: Attendance[]
+  allRawAttendance: Attendance[],
+  options?: { chalu_enabled?: boolean; moto_enabled?: boolean; full_day_minutes?: number }
 ): PreviewRow[] {
+  const isChaluOn = options?.chalu_enabled !== false
+  const isMotoOn = options?.moto_enabled !== false
   const allEngineAtt: AttendanceRow[] = allRawAttendance.map((a) => ({
     id: a.id,
     employee: a.employee,
     date: normDate(a.date),
     status: a.status as DayStatus,
+    worked_minutes: a.worked_minutes,
     ot_minutes: a.ot_minutes ?? 0,
     settled: !!a.settled_payout,
   }))
@@ -316,8 +322,8 @@ export function buildPreview(
       ctx.attendance.some((a) => !a.settled && a.date <= cutoff) ||
       ctx.adjustments.some((a) => !a.settled && a.date <= cutoff)
     const carryDiffers = ctx.worker.opening_carry_paise !== 0
-    const chaluBalance = upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise, cutoff)
-    const motoBalance = upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise, cutoff)
+    const chaluBalance = isChaluOn ? upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise, cutoff) : 0
+    const motoBalance = isMotoOn ? upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise, cutoff) : 0
     const included = hasActivity || carryDiffers || chaluBalance !== 0 || motoBalance !== 0
     if (!included) {
       return { context: ctx, included: false, computation: null, errors: [], warnings: [], unmarkedDates: [] }
@@ -331,7 +337,8 @@ export function buildPreview(
       ctx.attendance,
       ctx.adjustments,
       ctx.upads,
-      merged
+      merged,
+      options
     )
     if (!out.ok) {
       return { context: ctx, included: true, computation: null, errors: out.errors, warnings: [], unmarkedDates: [] }
@@ -393,7 +400,13 @@ export function buildStatementRecord(
     total_due_paise: res.total_due_paise,
     paid_paise: res.salary_paid_paise,
     closing_paise: res.closing_carry_paise,
-    days_worked: res.day_breakdown.filter((b) => b.status === 'full' || b.status === 'half').length,
+    days_worked: res.day_breakdown.reduce((sum, b) => {
+      if (b.days_worked !== undefined) return sum + b.days_worked
+      if (b.status === 'full') return sum + 1
+      if (b.status === 'half') return sum + 0.5
+      if (b.status === 'hours') return sum + ((b.worked_minutes ?? 0) / 480)
+      return sum
+    }, 0),
     ot_minutes: res.day_breakdown.reduce((s, b) => s + b.ot_minutes, 0),
     note: '',
     voided: false,
@@ -462,7 +475,8 @@ export async function savePayout(input: SavePayoutInput): Promise<{ runId: strin
       row.context.attendance,
       row.context.adjustments,
       row.context.upads,
-      row.inputs
+      row.inputs,
+      input.options
     )
     if (!comp.ok) {
       throw new Error(`payout invalid for worker ${row.context.employee.name}: ${JSON.stringify(comp.errors)}`)

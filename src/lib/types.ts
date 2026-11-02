@@ -1,4 +1,4 @@
-export type AttendanceStatus = 'full' | 'half' | 'absent'
+export type AttendanceStatus = 'full' | 'half' | 'absent' | 'hours'
 
 export type Employee = {
   id: string
@@ -42,6 +42,7 @@ export type Attendance = {
   employee: string
   date: string
   status: AttendanceStatus
+  worked_minutes?: number
   ot_minutes: number
   note: string
   created: string
@@ -73,6 +74,7 @@ export type UpadEntry = {
   date: string
   kind: UpadKind
   category: UpadCategory | ''
+  bucket?: 'chalu' | 'moto' | ''
   amount_paise: number
   note: string
   statement?: string

@@ -6,6 +6,10 @@ export const DEFAULT_SETTINGS: SettingsMap = {
   ot_divisor: '8',
   business_name: 'હાજરી પગાર',
   expected_payout_weekday: '4',
+  chalu_upad_enabled: 'true',
+  moto_upad_enabled: 'true',
+  hours_attendance_enabled: 'true',
+  hour_step_minutes: '30',
 }
 
 export function settingValue(settings: SettingsMap, key: string): string {
@@ -16,6 +20,27 @@ export function otDivisor(settings?: SettingsMap): number {
   if (!settings) return 8
   const parsed = Number.parseFloat(settingValue(settings, 'ot_divisor'))
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 8
+}
+
+export function isChaluUpadEnabled(settings?: SettingsMap): boolean {
+  if (!settings) return true
+  return settingValue(settings, 'chalu_upad_enabled') !== 'false'
+}
+
+export function isMotoUpadEnabled(settings?: SettingsMap): boolean {
+  if (!settings) return true
+  return settingValue(settings, 'moto_upad_enabled') !== 'false'
+}
+
+export function isHoursAttendanceEnabled(settings?: SettingsMap): boolean {
+  if (!settings) return true
+  return settingValue(settings, 'hours_attendance_enabled') !== 'false'
+}
+
+export function hourStepMinutes(settings?: SettingsMap): number {
+  if (!settings) return 30
+  const parsed = Number.parseInt(settingValue(settings, 'hour_step_minutes'), 10)
+  return parsed === 60 ? 60 : 30
 }
 
 export function lastClosedRun(runs: PayoutRun[]): PayoutRun | undefined {

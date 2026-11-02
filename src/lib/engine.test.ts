@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  AttendanceRow,
   computePayout,
   dayEarnings,
+  DayStatus,
+  normalizeAttendance,
   PayoutInputs,
   RateRow,
   upadBalance,
   UpadRow,
   unmarkedDaysFor,
+  validateLedgerChronology,
   WorkerRef,
 } from "./engine";
 
@@ -28,12 +32,13 @@ const worker = (over: Partial<WorkerRef> = {}): WorkerRef => ({
 
 function att(
   date: string,
-  status: "full" | "half" | "absent",
+  status: DayStatus,
   ot_minutes = 0,
   employee = "w1",
-  settled = false
-) {
-  return { id: `a-${employee}-${date}-${ot_minutes}`, employee, date, status, ot_minutes, settled };
+  settled = false,
+  worked_minutes?: number
+): AttendanceRow {
+  return { id: `a-${employee}-${date}-${ot_minutes}`, employee, date, status, ot_minutes, settled, worked_minutes };
 }
 
 function adj(
@@ -69,7 +74,7 @@ function run(
   cutoff: string,
   rates: RateRow[] = RATE_500,
   periods = FULL_PERIOD,
-  rows: ReturnType<typeof att>[] = [],
+  rows: AttendanceRow[] = [],
   adjustments: ReturnType<typeof adj>[] = [],
   entries: UpadRow[] = [],
   inputs: Partial<PayoutInputs> = {},
@@ -443,5 +448,172 @@ describe("spec worked cases", () => {
     );
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors[0].code).toBe("new_upad_negative");
+  });
+
+  it("case 26 — normalizeAttendance: 480 as full, 240 as half, 0 as absent, 180 as hours", () => {
+    // 480 minutes (8h) normalizes to full day, worked_minutes 0
+    expect(normalizeAttendance("hours", 480)).toEqual({
+      status: "full",
+      worked_minutes: 0,
+      ot_minutes: 0,
+    });
+    // 240 minutes (4h) normalizes to half day, worked_minutes 0
+    expect(normalizeAttendance("hours", 240)).toEqual({
+      status: "half",
+      worked_minutes: 0,
+      ot_minutes: 0,
+    });
+    // 0 minutes normalizes to absent, worked_minutes 0
+    expect(normalizeAttendance("hours", 0)).toEqual({
+      status: "absent",
+      worked_minutes: 0,
+      ot_minutes: 0,
+    });
+    // 180 minutes (3h) stays hours
+    expect(normalizeAttendance("hours", 180)).toEqual({
+      status: "hours",
+      worked_minutes: 180,
+      ot_minutes: 0,
+    });
+    // status full stays full
+    expect(normalizeAttendance("full", 0)).toEqual({
+      status: "full",
+      worked_minutes: 0,
+      ot_minutes: 0,
+    });
+    // status half stays half
+    expect(normalizeAttendance("half", 0)).toEqual({
+      status: "half",
+      worked_minutes: 0,
+      ot_minutes: 0,
+    });
+  });
+
+  it("case 27 — dayEarnings and days_worked for hours days", () => {
+    // 3 hours = 180 minutes out of 480 minutes = 0.375 days worked
+    // Rate: ₹500/day = 50,000 paise
+    // Pay: roundHalfUp(50,000 * 180 / 480) = roundHalfUp(18,750) = 18,750 paise (₹187.50)
+    const earn3h = dayEarnings("hours", 0, 50000, 180);
+    expect(earn3h.base_paise).toBe(18750);
+    expect(earn3h.total_paise).toBe(18750);
+    expect(earn3h.days_worked).toBe(0.375);
+
+    // 1 hour = 60 minutes = 0.125 days worked
+    // Pay: roundHalfUp(50,000 * 60 / 480) = roundHalfUp(6,250) = 6,250 paise (₹62.50)
+    const earn1h = dayEarnings("hours", 0, 50000, 60);
+    expect(earn1h.base_paise).toBe(6250);
+    expect(earn1h.total_paise).toBe(6250);
+    expect(earn1h.days_worked).toBe(0.125);
+
+    // Hours with OT: 3h worked (180m) + 1h OT (60m)
+    // Base: 18,750 paise, OT: 6,250 paise, Total: 25,000 paise
+    const earn3hOt1h = dayEarnings("hours", 60, 50000, 180);
+    expect(earn3hOt1h.base_paise).toBe(18750);
+    expect(earn3hOt1h.ot_paise).toBe(6250);
+    expect(earn3hOt1h.total_paise).toBe(25000);
+    expect(earn3hOt1h.days_worked).toBe(0.375);
+  });
+
+  it("case 28 — computePayout aggregates fractional days_worked for hours days", () => {
+    const r = run(
+      worker({ opening_carry_paise: 0, opening_date: "2026-10-01" }),
+      "2026-10-03",
+      RATE_500,
+      FULL_PERIOD,
+      [
+        att("2026-10-01", "full"),
+        att("2026-10-02", "hours", 0, "w1", false, 180),
+        att("2026-10-03", "half"),
+      ],
+      [],
+      []
+    );
+    if (!r.ok) throw new Error(JSON.stringify(r.errors));
+    // Full day (1.0) + 3h (0.375) + Half day (0.5) = 1.875 days
+    expect(r.result.days_worked).toBe(1.875);
+    // 50,000 + 18,750 + 25,000 = 93,750 paise
+    expect(r.result.earned_paise).toBe(93750);
+    expect(r.result.day_breakdown[1].worked_minutes).toBe(180);
+    expect(r.result.day_breakdown[1].days_worked).toBe(0.375);
+  });
+
+  it("case 29 — computePayout with chalu_enabled: false isolates Main upad with identical totals", () => {
+    const rOn = run(
+      worker({ opening_chalu_paise: 0, opening_moto_paise: 100000 }),
+      "2026-10-02",
+      RATE_500,
+      FULL_PERIOD,
+      [att("2026-10-01", "full"), att("2026-10-02", "full")],
+      [],
+      [],
+      { moto_recovery_paise: 30000 }
+    );
+    expect(rOn.ok).toBe(true);
+
+    const rOff = computePayout(
+      worker({ opening_chalu_paise: 0, opening_moto_paise: 100000 }),
+      "",
+      "2026-10-02",
+      RATE_500,
+      FULL_PERIOD,
+      [att("2026-10-01", "full"), att("2026-10-02", "full")],
+      [],
+      [],
+      {
+        chalu_recovery_paise: 0,
+        moto_recovery_paise: 30000,
+        salary_paid_paise: 0,
+        new_upad_bucket: "moto",
+        new_upad_given_paise: 0,
+      },
+      { chalu_enabled: false, moto_enabled: true }
+    );
+    expect(rOff.ok).toBe(true);
+    if (rOn.ok && rOff.ok) {
+      expect(rOff.result.total_due_paise).toBe(rOn.result.total_due_paise);
+      expect(rOff.result.payable_paise).toBe(rOn.result.payable_paise);
+      expect(rOff.result.cash_to_hand_over_paise).toBe(rOn.result.cash_to_hand_over_paise);
+      expect(rOff.result.chalu_balance_paise).toBe(0);
+      expect(rOff.result.moto_balance_paise).toBe(100000);
+      expect(rOff.result.moto_after_paise).toBe(70000);
+    }
+  });
+
+  it("case 30 — validateLedgerChronology refuses backdated settle that makes running balance negative", () => {
+    const existing: UpadRow[] = [
+      upad("2026-10-01", "chalu", "given", 50000),
+      upad("2026-10-08", "chalu", "recovery", 40000),
+    ];
+    // Proposing to return 300 on Oct 05:
+    // Oct 01: 500
+    // Oct 05: -300 -> bal = 200
+    // Oct 08: -400 -> bal = 200 - 400 = -200 -> REFUSED!
+    const res = validateLedgerChronology(existing, 0, "chalu", {
+      date: "2026-10-05",
+      kind: "returned",
+      amount_paise: 30000,
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.date).toBe("2026-10-08");
+      expect(res.amount_paise).toBe(20000); // would drop below zero by 20000
+    }
+  });
+
+  it("case 31 — validateLedgerChronology accepts valid settle when running balance remains >= 0", () => {
+    const existing: UpadRow[] = [
+      upad("2026-10-01", "chalu", "given", 50000),
+      upad("2026-10-08", "chalu", "recovery", 20000),
+    ];
+    // Proposing to return 200 on Oct 05:
+    // Oct 01: 500
+    // Oct 05: -200 -> bal = 300
+    // Oct 08: -200 -> bal = 100 -> OK!
+    const res = validateLedgerChronology(existing, 0, "chalu", {
+      date: "2026-10-05",
+      kind: "returned",
+      amount_paise: 20000,
+    });
+    expect(res.ok).toBe(true);
   });
 });

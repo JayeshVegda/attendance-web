@@ -18,7 +18,38 @@ import type {
   CycleRow,
 } from './types'
 import { computeCycleRows } from './payroll'
-import { DEFAULT_SETTINGS, otDivisor, settingValue } from './cycle'
+import { DEFAULT_SETTINGS, isChaluUpadEnabled, isMotoUpadEnabled, otDivisor, settingValue } from './cycle'
+import {
+  normalizeAttendance,
+  upadBalance,
+  validateLedgerChronology,
+  type Bucket,
+} from './engine'
+
+export type WorkerBalanceDetail = {
+  id: string
+  employee_no: string
+  name: string
+  active: boolean
+  balance_paise: number
+}
+
+export class BucketOutstandingBalanceError extends Error {
+  bucket: 'chalu' | 'moto'
+  totalPaise: number
+  workers: WorkerBalanceDetail[]
+
+  constructor(bucket: 'chalu' | 'moto', totalPaise: number, workers: WorkerBalanceDetail[]) {
+    const bucketLabel = bucket === 'chalu' ? 'Chalu Upad' : 'Main Upad'
+    super(
+      `Cannot disable ${bucketLabel}: ${workers.length} worker(s) have an outstanding balance totaling ₹${(totalPaise / 100).toFixed(2)}. Settle all balances before disabling.`
+    )
+    this.name = 'BucketOutstandingBalanceError'
+    this.bucket = bucket
+    this.totalPaise = totalPaise
+    this.workers = workers
+  }
+}
 
 export function pbDateFilter(date: string): string {
   return `${dateKey(date)} 00:00:00.000Z`
@@ -108,6 +139,48 @@ export async function getSettings(): Promise<SettingsMap> {
 }
 
 export async function saveSetting(key: string, value: string): Promise<void> {
+  if ((key === 'chalu_upad_enabled' || key === 'moto_upad_enabled') && value === 'false') {
+    const bucket: Bucket = key === 'chalu_upad_enabled' ? 'chalu' : 'moto'
+    const [allEmployees, allUpad] = await Promise.all([
+      listEmployees(true),
+      listUpadEntries(),
+    ])
+    const workersWithBalance: WorkerBalanceDetail[] = []
+    let totalOutstanding = 0
+
+    for (const emp of allEmployees) {
+      const opening = bucket === 'chalu'
+        ? (emp.opening_chalu_paise ?? emp.opening_upad_paise ?? 0)
+        : (emp.opening_moto_paise ?? 0)
+      const empEntries = allUpad
+        .filter((u) => u.employee === emp.id && !u.voided)
+        .map((u) => ({
+          id: u.id,
+          employee: u.employee,
+          date: dateKey(u.date),
+          bucket: (u.bucket ?? (u.category === 'extra' || u.category === 'moto' ? 'moto' : 'chalu')) as Bucket,
+          kind: u.kind,
+          amount_paise: u.amount_paise,
+          voided: u.voided,
+        }))
+      const bal = upadBalance(empEntries, bucket, opening)
+      if (bal > 0) {
+        workersWithBalance.push({
+          id: emp.id,
+          employee_no: emp.employee_no,
+          name: emp.name,
+          active: emp.active,
+          balance_paise: bal,
+        })
+        totalOutstanding += bal
+      }
+    }
+
+    if (workersWithBalance.length > 0) {
+      throw new BucketOutstandingBalanceError(bucket, totalOutstanding, workersWithBalance)
+    }
+  }
+
   try {
     const existing = await pb
       .collection(COLLECTIONS.settings)
@@ -250,15 +323,18 @@ export async function saveAttendance(input: {
   date: string
   status: AttendanceStatus
   otMinutes?: number
+  workedMinutes?: number
   existingId?: string
   note?: string
 }): Promise<Attendance> {
+  const norm = normalizeAttendance(input.status, input.workedMinutes, input.otMinutes)
   const formattedDate = input.date.includes(' ') ? input.date : `${dateKey(input.date)} 00:00:00.000Z`
   const body = {
     employee: input.employeeId,
     date: formattedDate,
-    status: input.status,
-    ot_minutes: Math.max(0, Math.min(300, input.otMinutes ?? 0)),
+    status: norm.status,
+    worked_minutes: norm.worked_minutes,
+    ot_minutes: Math.max(0, Math.min(300, norm.ot_minutes)),
     note: input.note || '',
   }
 
@@ -371,6 +447,8 @@ export async function updateUpadEntry(id: string, data: Partial<UpadEntry>): Pro
   return record
 }
 
+const inFlightSettleKeys = new Set<string>()
+
 export async function createUpadEntry(input: {
   employeeId: string
   date: string
@@ -381,9 +459,47 @@ export async function createUpadEntry(input: {
   note?: string
   statementId?: string
 }): Promise<UpadEntry> {
-  const resolvedBucket =
+  const resolvedBucket: Bucket =
     input.bucket ??
     (input.category === 'moto' || input.category === 'extra' ? 'moto' : 'chalu')
+
+  const settings = await getSettings()
+  if (resolvedBucket === 'chalu' && !isChaluUpadEnabled(settings)) {
+    throw new Error('Cannot create entry: Chalu Upad is disabled in Settings.')
+  }
+  if (resolvedBucket === 'moto' && !isMotoUpadEnabled(settings)) {
+    throw new Error('Cannot create entry: Main Upad is disabled in Settings.')
+  }
+
+  if (input.kind === 'returned' || input.kind === 'writeoff') {
+    const [employee, empUpads] = await Promise.all([
+      pb.collection(COLLECTIONS.employees).getOne<Employee>(input.employeeId),
+      listUpadEntries(),
+    ])
+    const opening = resolvedBucket === 'chalu'
+      ? (employee.opening_chalu_paise ?? employee.opening_upad_paise ?? 0)
+      : (employee.opening_moto_paise ?? 0)
+    const existingRows = empUpads
+      .filter((u) => u.employee === input.employeeId && !u.voided)
+      .map((u) => ({
+        id: u.id,
+        employee: u.employee,
+        date: dateKey(u.date),
+        bucket: (u.bucket ?? (u.category === 'extra' || u.category === 'moto' ? 'moto' : 'chalu')) as Bucket,
+        kind: u.kind,
+        amount_paise: u.amount_paise,
+        voided: u.voided,
+      }))
+    const check = validateLedgerChronology(existingRows, opening, resolvedBucket, {
+      date: dateKey(input.date),
+      kind: input.kind,
+      amount_paise: Math.abs(input.amountPaise),
+    })
+    if (!check.ok) {
+      throw new Error(check.error)
+    }
+  }
+
   const record = await pb.collection(COLLECTIONS.upad).create<UpadEntry>({
     employee: input.employeeId,
     date: input.date.includes(' ') ? input.date : `${dateKey(input.date)} 00:00:00.000Z`,
@@ -397,6 +513,40 @@ export async function createUpadEntry(input: {
   })
   await audit(`upad.${input.kind}`, 'upad_entries', record.id, `${input.amountPaise}`)
   return record
+}
+
+export async function settleUpadBalance(input: {
+  employeeId: string
+  bucket: 'chalu' | 'moto'
+  kind: 'returned' | 'writeoff'
+  amountPaise: number
+  date?: string
+  note?: string
+  idempotencyKey?: string
+}): Promise<UpadEntry> {
+  if (input.idempotencyKey) {
+    if (inFlightSettleKeys.has(input.idempotencyKey)) {
+      throw new Error('Settlement is already saving. Please wait.')
+    }
+    inFlightSettleKeys.add(input.idempotencyKey)
+  }
+  try {
+    const defaultNote = input.kind === 'writeoff' ? 'Balance written off' : 'Paid back in cash'
+    return await createUpadEntry({
+      employeeId: input.employeeId,
+      date: input.date ?? todayKey(),
+      kind: input.kind,
+      amountPaise: input.amountPaise,
+      bucket: input.bucket,
+      category: input.bucket,
+      note: input.note || defaultNote,
+    })
+  } finally {
+    if (input.idempotencyKey) {
+      const key = input.idempotencyKey
+      setTimeout(() => inFlightSettleKeys.delete(key), 3000)
+    }
+  }
 }
 
 export async function createCashReturn(input: {

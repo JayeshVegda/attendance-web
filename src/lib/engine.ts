@@ -2,9 +2,10 @@ import { addDays, dateKey, parseDate } from "./dates";
 
 export type Paise = number;
 export type Bucket = "chalu" | "moto";
-export type DayStatus = "full" | "half" | "absent" | "";
+export type DayStatus = "full" | "half" | "absent" | "hours" | "";
 export type AdjustmentKind = "bonus" | "reimbursement" | "deduction";
 export type UpadKind = "given" | "returned" | "recovery" | "writeoff";
+export const DEFAULT_FULL_DAY_MINUTES = 480;
 export type EngineError =
   | { code: "chalu_recovery_exceeds_balance"; amount: Paise }
   | { code: "moto_recovery_exceeds_balance"; amount: Paise }
@@ -24,6 +25,7 @@ export type AttendanceRow = {
   employee: string;
   date: string;
   status: DayStatus;
+  worked_minutes?: number;
   ot_minutes: number;
   settled: boolean;
 };
@@ -69,6 +71,8 @@ export type PayoutInputs = {
 export type DayBreakdownRow = {
   date: string;
   status: DayStatus;
+  worked_minutes?: number;
+  days_worked: number;
   ot_minutes: number;
   rate_paise: Paise;
   base_paise: Paise;
@@ -102,6 +106,7 @@ export type PayoutComputation = {
   chalu_after_paise: Paise;
   moto_after_paise: Paise;
   day_breakdown: DayBreakdownRow[];
+  days_worked: number;
   late_entry_count: number;
   warnings: EngineWarning[];
 };
@@ -110,19 +115,70 @@ export function roundHalfUp(x: number): Paise {
   return Math.floor(x + 0.5);
 }
 
+export function normalizeAttendance(
+  status: DayStatus,
+  worked_minutes?: number,
+  ot_minutes?: number,
+  step_minutes: number = 30,
+  full_day_minutes: number = DEFAULT_FULL_DAY_MINUTES
+): { status: DayStatus; worked_minutes: number; ot_minutes: number } {
+  const cleanOt = Math.max(0, ot_minutes ?? 0);
+  if (!status || status === "absent") {
+    return { status: status === "" ? "" : "absent", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  if (status === "full") {
+    return { status: "full", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  if (status === "half") {
+    return { status: "half", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  // status === "hours"
+  let wm = Math.max(0, worked_minutes ?? 0);
+  if (wm <= 0) {
+    return { status: "absent", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  const halfMin = Math.round(full_day_minutes / 2);
+  if (wm === halfMin) {
+    return { status: "half", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  if (wm >= full_day_minutes) {
+    return { status: "full", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  const step = step_minutes > 0 ? step_minutes : 30;
+  const rem = wm % step;
+  if (rem !== 0) {
+    wm = Math.round(wm / step) * step;
+    if (wm <= 0) return { status: "absent", worked_minutes: 0, ot_minutes: cleanOt };
+    if (wm === halfMin) return { status: "half", worked_minutes: 0, ot_minutes: cleanOt };
+    if (wm >= full_day_minutes) return { status: "full", worked_minutes: 0, ot_minutes: cleanOt };
+  }
+  return { status: "hours", worked_minutes: wm, ot_minutes: cleanOt };
+}
+
 export function dayEarnings(
   status: DayStatus,
   ot_minutes: number,
-  rate_paise: Paise
-): { base_paise: Paise; ot_paise: Paise; total_paise: Paise } {
-  if (status !== "full" && status !== "half") {
-    return { base_paise: 0, ot_paise: 0, total_paise: 0 };
+  rate_paise: Paise,
+  worked_minutes?: number,
+  full_day_minutes: number = DEFAULT_FULL_DAY_MINUTES
+): { base_paise: Paise; ot_paise: Paise; total_paise: Paise; days_worked: number } {
+  const norm = normalizeAttendance(status, worked_minutes, ot_minutes, 30, full_day_minutes);
+  const ot = norm.ot_minutes > 0 ? roundHalfUp((rate_paise * norm.ot_minutes) / full_day_minutes) : 0;
+
+  if (norm.status === "full") {
+    return { base_paise: rate_paise, ot_paise: ot, total_paise: rate_paise + ot, days_worked: 1 };
   }
-  const base =
-    status === "full" ? rate_paise : roundHalfUp(rate_paise / 2);
-  const ot =
-    ot_minutes > 0 ? roundHalfUp((rate_paise * ot_minutes) / 480) : 0;
-  return { base_paise: base, ot_paise: ot, total_paise: base + ot };
+  if (norm.status === "half") {
+    const base = roundHalfUp(rate_paise / 2);
+    return { base_paise: base, ot_paise: ot, total_paise: base + ot, days_worked: 0.5 };
+  }
+  if (norm.status === "hours") {
+    const wm = norm.worked_minutes;
+    const base = roundHalfUp((rate_paise * wm) / full_day_minutes);
+    const days = wm / full_day_minutes;
+    return { base_paise: base, ot_paise: ot, total_paise: base + ot, days_worked: days };
+  }
+  return { base_paise: 0, ot_paise: 0, total_paise: 0, days_worked: 0 };
 }
 
 export function rateOn(rates: RateRow[], date: string): Paise | undefined {
@@ -230,8 +286,17 @@ export function computePayout(
   attendance: AttendanceRow[],
   adjustments: AdjustmentRow[],
   upad_entries: UpadRow[],
-  inputs: PayoutInputs
+  inputs: PayoutInputs,
+  options?: {
+    chalu_enabled?: boolean;
+    moto_enabled?: boolean;
+    full_day_minutes?: number;
+  }
 ): { ok: false; errors: EngineError[] } | { ok: true; result: PayoutComputation } {
+  const fullDayMinutes = options?.full_day_minutes ?? DEFAULT_FULL_DAY_MINUTES;
+  const isChaluOn = options?.chalu_enabled !== false;
+  const isMotoOn = options?.moto_enabled !== false;
+
   const from = workerFromDate(worker, paid_up_to);
   const rows = attendance.filter(
     (r) =>
@@ -260,13 +325,15 @@ export function computePayout(
       continue;
     }
     const rate = rateOn(rates, d) ?? worker.daily_rate_paise ?? 0;
-    const e = dayEarnings(row.status, row.ot_minutes, rate);
+    const e = dayEarnings(row.status, row.ot_minutes, rate, row.worked_minutes, fullDayMinutes);
     ot += e.ot_paise;
     earned += e.total_paise;
     if (e.base_paise || e.ot_paise) {
       breakdown.push({
         date: d,
         status: row.status,
+        worked_minutes: row.worked_minutes,
+        days_worked: e.days_worked,
         ot_minutes: row.ot_minutes,
         rate_paise: rate,
         base_paise: e.base_paise,
@@ -280,12 +347,14 @@ export function computePayout(
   for (const r of lateRows) {
     if (!r.status || !inAnyPeriod(periods, r.date)) continue;
     const rate = rateOn(rates, r.date) ?? worker.daily_rate_paise ?? 0;
-    const e = dayEarnings(r.status, r.ot_minutes, rate);
+    const e = dayEarnings(r.status, r.ot_minutes, rate, r.worked_minutes, fullDayMinutes);
     ot += e.ot_paise;
     earned += e.total_paise;
     breakdown.push({
       date: r.date,
       status: r.status,
+      worked_minutes: r.worked_minutes,
+      days_worked: e.days_worked,
       ot_minutes: r.ot_minutes,
       rate_paise: rate,
       base_paise: e.base_paise,
@@ -311,26 +380,33 @@ export function computePayout(
   const totalDue = carry + earned + adjustmentsSum;
   const available = Math.max(0, totalDue);
 
-  const chaluBalance = upadBalance(upad_entries, "chalu", worker.opening_chalu_paise, cutoff);
-  const motoBalance = upadBalance(upad_entries, "moto", worker.opening_moto_paise, cutoff);
+  const chaluBalance = isChaluOn
+    ? upadBalance(upad_entries, "chalu", worker.opening_chalu_paise, cutoff)
+    : 0;
+  const motoBalance = isMotoOn
+    ? upadBalance(upad_entries, "moto", worker.opening_moto_paise, cutoff)
+    : 0;
 
   const chaluMaxRec = Math.max(0, chaluBalance);
   const motoMaxRec = Math.max(0, motoBalance);
 
+  const actualChaluRec = isChaluOn ? inputs.chalu_recovery_paise : 0;
+  const actualMotoRec = isMotoOn ? inputs.moto_recovery_paise : 0;
+
   const errors: EngineError[] = [];
-  if (inputs.chalu_recovery_paise < 0 || inputs.chalu_recovery_paise > chaluMaxRec) {
+  if (isChaluOn && (actualChaluRec < 0 || actualChaluRec > chaluMaxRec)) {
     errors.push({
       code: "chalu_recovery_exceeds_balance",
-      amount: Math.max(0, inputs.chalu_recovery_paise - chaluMaxRec),
+      amount: Math.max(0, actualChaluRec - chaluMaxRec),
     });
   }
-  if (inputs.moto_recovery_paise < 0 || inputs.moto_recovery_paise > motoMaxRec) {
+  if (isMotoOn && (actualMotoRec < 0 || actualMotoRec > motoMaxRec)) {
     errors.push({
       code: "moto_recovery_exceeds_balance",
-      amount: Math.max(0, inputs.moto_recovery_paise - motoMaxRec),
+      amount: Math.max(0, actualMotoRec - motoMaxRec),
     });
   }
-  const totalRecovery = Math.max(0, inputs.chalu_recovery_paise) + Math.max(0, inputs.moto_recovery_paise);
+  const totalRecovery = Math.max(0, actualChaluRec) + Math.max(0, actualMotoRec);
   if (totalRecovery > available) {
     errors.push({ code: "recovery_exceeds_due", amount: totalRecovery - available });
   }
@@ -341,8 +417,11 @@ export function computePayout(
     });
   }
 
-  const newChalu = inputs.new_chalu_given_paise ?? (inputs.new_upad_bucket === "chalu" ? (inputs.new_upad_given_paise ?? 0) : 0);
-  const newMoto = inputs.new_moto_given_paise ?? (inputs.new_upad_bucket === "moto" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  const rawNewChalu = inputs.new_chalu_given_paise ?? (inputs.new_upad_bucket === "chalu" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  const rawNewMoto = inputs.new_moto_given_paise ?? (inputs.new_upad_bucket === "moto" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  const newChalu = isChaluOn ? rawNewChalu : 0;
+  const newMoto = isMotoOn ? rawNewMoto : 0;
+
   if (newChalu < 0 || newMoto < 0) {
     errors.push({ code: "new_upad_negative", amount: Math.min(0, newChalu) + Math.min(0, newMoto) });
   }
@@ -358,8 +437,8 @@ export function computePayout(
   if (lateCount > 0) warnings.push({ code: "late_entries", count: lateCount });
 
   const totalNewUpad = newChalu + newMoto;
-  const chaluAfter = chaluBalance - Math.max(0, inputs.chalu_recovery_paise) + newChalu;
-  const motoAfter = motoBalance - Math.max(0, inputs.moto_recovery_paise) + newMoto;
+  const chaluAfter = chaluBalance - Math.max(0, actualChaluRec) + newChalu;
+  const motoAfter = motoBalance - Math.max(0, actualMotoRec) + newMoto;
 
   return {
     ok: true,
@@ -374,11 +453,11 @@ export function computePayout(
       total_due_paise: totalDue,
       chalu_balance_paise: chaluBalance,
       moto_balance_paise: motoBalance,
-      chalu_recovery_paise: Math.max(0, inputs.chalu_recovery_paise),
-      moto_recovery_paise: Math.max(0, inputs.moto_recovery_paise),
+      chalu_recovery_paise: Math.max(0, actualChaluRec),
+      moto_recovery_paise: Math.max(0, actualMotoRec),
       salary_paid_paise: inputs.salary_paid_paise,
       payable_paise: payable,
-      new_upad_bucket: inputs.new_upad_bucket ?? "chalu",
+      new_upad_bucket: isChaluOn ? (inputs.new_upad_bucket ?? "chalu") : "moto",
       new_upad_given_paise: totalNewUpad,
       new_chalu_given_paise: newChalu,
       new_moto_given_paise: newMoto,
@@ -388,8 +467,64 @@ export function computePayout(
       chalu_after_paise: chaluAfter,
       moto_after_paise: motoAfter,
       day_breakdown: breakdown,
+      days_worked: breakdown.reduce((sum, d) => sum + d.days_worked, 0),
       late_entry_count: lateCount,
       warnings,
     },
   };
+}
+
+export function validateLedgerChronology(
+  existingRows: UpadRow[],
+  opening_paise: Paise,
+  bucket: Bucket,
+  proposedEntry: {
+    id?: string;
+    date: string;
+    kind: UpadKind;
+    amount_paise: Paise;
+  }
+): { ok: true } | { ok: false; error: string; date: string; running_paise: Paise; amount_paise: Paise } {
+  const entries: Array<{ date: string; kind: UpadKind; amount_paise: Paise; isProposed?: boolean }> = [];
+  for (const r of existingRows) {
+    if (r.voided || r.bucket !== bucket) continue;
+    if (proposedEntry.id && r.id === proposedEntry.id) continue;
+    entries.push({ date: dateKey(r.date), kind: r.kind, amount_paise: r.amount_paise });
+  }
+  entries.push({
+    date: dateKey(proposedEntry.date),
+    kind: proposedEntry.kind,
+    amount_paise: proposedEntry.amount_paise,
+    isProposed: true,
+  });
+
+  const kindPriority: Record<UpadKind, number> = {
+    given: 1,
+    recovery: 2,
+    returned: 3,
+    writeoff: 4,
+  };
+  entries.sort((a, b) => {
+    if (a.date !== b.date) return a.date.localeCompare(b.date);
+    return kindPriority[a.kind] - kindPriority[b.kind];
+  });
+
+  let running = opening_paise;
+  for (const entry of entries) {
+    if (entry.kind === "given") {
+      running += entry.amount_paise;
+    } else {
+      running -= entry.amount_paise;
+    }
+    if (running < 0) {
+      return {
+        ok: false,
+        date: entry.date,
+        running_paise: running,
+        amount_paise: Math.abs(running),
+        error: `Refused: settlement would make balance negative on ${entry.date} (₹${(Math.abs(running) / 100).toFixed(2)})`,
+      };
+    }
+  }
+  return { ok: true };
 }

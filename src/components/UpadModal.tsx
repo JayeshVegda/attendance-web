@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Coins, HandCoins, Info, Wallet } from 'lucide-react'
-import { createAdjustment, createUpadEntry, listUpadEntries } from '../lib/api'
+import { createAdjustment, createUpadEntry, getSettings, listUpadEntries } from '../lib/api'
+import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
 import { todayKey } from '../lib/dates'
 import { formatMoney, parseMoneyInput } from '../lib/money'
 import { upadBreakdownForEmployee } from '../lib/payroll'
@@ -39,17 +40,20 @@ export function UpadModal({
   const queryClient = useQueryClient()
 
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries(), enabled: open })
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings, enabled: open })
+  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
+  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
 
   useEffect(() => {
     if (!open) return
     setEmployeeId(defaultEmployeeId || employees.find((employee) => employee.active)?.id || '')
     setKind(defaultKind === 'recovery' ? 'given' : defaultKind)
-    setCategory(defaultCategory)
+    setCategory(isChaluOn ? defaultCategory : 'moto')
     setDate(todayKey())
     setAmount('')
     setNote('')
     setError('')
-  }, [open, defaultEmployeeId, defaultKind, defaultCategory, employees])
+  }, [open, defaultEmployeeId, defaultKind, defaultCategory, employees, isChaluOn])
 
   const employee = employees.find((entry) => entry.id === employeeId)
 
@@ -155,11 +159,13 @@ export function UpadModal({
       }
 
       // Normal given or writeoff
+      const effectiveCategory: UpadCategory = !isChaluOn ? 'moto' : !isMotoOn ? 'chalu' : category
       await createUpadEntry({
         employeeId,
         date,
         kind: kind as UpadKind,
-        category,
+        category: effectiveCategory,
+        bucket: effectiveCategory === 'moto' || effectiveCategory === 'extra' ? 'moto' : 'chalu',
         amountPaise: paise,
         note: note.trim(),
       })
@@ -241,14 +247,32 @@ export function UpadModal({
               <span className="text-stone-500 font-medium">Rate: {formatMoney(employee.daily_rate_paise)}/d</span>
             </div>
             <div className="mt-1 flex items-center gap-3 text-stone-600">
-              <span>
-                Chalu Upad: <strong className="text-amber-800">{formatMoney(employeeUpad.chalu)}</strong>
-              </span>
-              <span>·</span>
-              <span>
-                Main Upad: <strong className="text-purple-800">{formatMoney(employeeUpad.moto)}</strong>
-              </span>
-              <span>·</span>
+              {isChaluOn && isMotoOn ? (
+                <>
+                  <span>
+                    Chalu Upad: <strong className="text-amber-800">{formatMoney(employeeUpad.chalu)}</strong>
+                  </span>
+                  <span>·</span>
+                  <span>
+                    Main Upad: <strong className="text-purple-800">{formatMoney(employeeUpad.moto)}</strong>
+                  </span>
+                  <span>·</span>
+                </>
+              ) : isMotoOn ? (
+                <>
+                  <span>
+                    Main Loan: <strong className="text-purple-800">{formatMoney(employeeUpad.moto)}</strong>
+                  </span>
+                  <span>·</span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    Chalu Upad: <strong className="text-amber-800">{formatMoney(employeeUpad.chalu)}</strong>
+                  </span>
+                  <span>·</span>
+                </>
+              )}
               <span>
                 Total Loan:{' '}
                 <strong className={employeeUpad.total > 0 ? 'text-rose-700' : 'text-stone-700'}>
@@ -285,7 +309,7 @@ export function UpadModal({
             </Select>
           </Field>
 
-          {!isJama && (
+          {!isJama && isChaluOn && isMotoOn && (
             <Field label="Upad Bucket" hint="Chalu = running daily advance. Main = large loan.">
               <Select
                 value={category === 'regular' ? 'chalu' : category === 'extra' ? 'moto' : category}

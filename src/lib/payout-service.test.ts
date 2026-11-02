@@ -586,6 +586,183 @@ describe("payout service against live pocketbase", () => {
       await pb.collection("payout_runs").delete(lockRun.id).catch(() => {});
     }
   });
+
+  it("saveSetting refuses turning Chalu OFF when workers have balance and lists them", async ({ skip }) => {
+    if (!hasBackend) skip();
+    const pb = (await import("./pb")).pb;
+    const { saveSetting, BucketOutstandingBalanceError } = await import("./api");
+
+    // Create a temporary worker with opening chalu balance
+    const testWorker = await pb.collection("employees").create({
+      name: "Test Chalu Worker",
+      employee_no: "9999",
+      active: true,
+      daily_rate_paise: 50000,
+      opening_chalu_paise: 45000, // ₹450
+      opening_salary_paise: 0,
+      opening_upad_paise: 45000,
+      joined_on: "2026-10-01",
+    });
+
+    try {
+      let threw = false;
+      try {
+        await saveSetting("chalu_upad_enabled", "false");
+      } catch (err) {
+        threw = true;
+        expect(err).toBeInstanceOf(BucketOutstandingBalanceError);
+        const bErr = err as InstanceType<typeof BucketOutstandingBalanceError>;
+        expect(bErr.bucket).toBe("chalu");
+        expect(bErr.totalPaise).toBeGreaterThanOrEqual(45000);
+        expect(bErr.workers.some((w) => w.id === testWorker.id)).toBe(true);
+      }
+      expect(threw).toBe(true);
+    } finally {
+      await pb.collection("employees").delete(testWorker.id).catch(() => {});
+    }
+  });
+
+  it("createUpadEntry refuses backdated settle that makes running balance negative", async ({ skip }) => {
+    if (!hasBackend) skip();
+    const pb = (await import("./pb")).pb;
+    const { createUpadEntry } = await import("./api");
+
+    const testWorker = await pb.collection("employees").create({
+      name: "Test Chrono Worker",
+      employee_no: "9998",
+      active: true,
+      daily_rate_paise: 50000,
+      opening_chalu_paise: 0,
+      opening_salary_paise: 0,
+      opening_upad_paise: 0,
+      joined_on: "2026-10-01",
+    });
+
+    let g1Id = "";
+    let r1Id = "";
+    try {
+      // 1. Advance given on 2026-10-01: ₹500
+      const g1 = await createUpadEntry({
+        employeeId: testWorker.id,
+        date: "2026-10-01",
+        kind: "given",
+        bucket: "chalu",
+        amountPaise: 50000,
+      });
+      g1Id = g1.id;
+
+      // 2. Recovery on 2026-10-08: ₹400 (leaves balance ₹100)
+      const r1 = await createUpadEntry({
+        employeeId: testWorker.id,
+        date: "2026-10-08",
+        kind: "recovery",
+        bucket: "chalu",
+        amountPaise: 40000,
+      });
+      r1Id = r1.id;
+
+      // 3. Propose backdated return on 2026-10-05: ₹300
+      // Ledger replay: Oct 1: 500 -> Oct 5: -300 (bal 200) -> Oct 8: -400 (bal -200) -> REFUSED!
+      await expect(
+        createUpadEntry({
+          employeeId: testWorker.id,
+          date: "2026-10-05",
+          kind: "returned",
+          bucket: "chalu",
+          amountPaise: 30000,
+        })
+      ).rejects.toThrow(/Refused: settlement would make balance negative on 2026-10-08/);
+    } finally {
+      if (g1Id) await pb.collection("upad_entries").delete(g1Id).catch(() => {});
+      if (r1Id) await pb.collection("upad_entries").delete(r1Id).catch(() => {});
+      await pb.collection("employees").delete(testWorker.id).catch(() => {});
+    }
+  });
+
+  it("settle in an already-paid period leaves existing statements untouched", async ({ skip }) => {
+    if (!hasBackend) skip();
+    const pb = (await import("./pb")).pb;
+    const { createUpadEntry, listStatements } = await import("./api");
+
+    const statementsBefore = await listStatements();
+    const existingStmtsJson = JSON.stringify(statementsBefore.map((s) => ({ id: s.id, closing: s.closing_paise })));
+
+    // Create an entry dated in the past
+    const contexts = await loadWorkerContexts();
+    const empId = contexts[0]?.employee.id;
+    if (!empId) skip();
+
+    const entry = await createUpadEntry({
+      employeeId: empId,
+      date: "2026-09-01",
+      kind: "given",
+      bucket: "moto",
+      amountPaise: 1000,
+      note: "statement immutability test",
+    });
+
+    try {
+      const statementsAfter = await listStatements();
+      const afterStmtsJson = JSON.stringify(statementsAfter.map((s) => ({ id: s.id, closing: s.closing_paise })));
+      expect(afterStmtsJson).toBe(existingStmtsJson);
+    } finally {
+      await pb.collection("upad_entries").delete(entry.id).catch(() => {});
+    }
+  });
+
+  it("double-click idempotency protection saves once", async ({ skip }) => {
+    if (!hasBackend) skip();
+    const pb = (await import("./pb")).pb;
+    const { settleUpadBalance } = await import("./api");
+
+    const testWorker = await pb.collection("employees").create({
+      name: "Test DoubleClick Worker",
+      employee_no: "9997",
+      active: true,
+      daily_rate_paise: 50000,
+      opening_chalu_paise: 50000,
+      opening_salary_paise: 0,
+      opening_upad_paise: 50000,
+      joined_on: "2026-10-01",
+    });
+
+    const key = `idem-${Date.now()}`;
+    let createdId = "";
+    try {
+      // Fire two calls simultaneously with the same idempotency key
+      const [res1, res2] = await Promise.allSettled([
+        settleUpadBalance({
+          employeeId: testWorker.id,
+          bucket: "chalu",
+          kind: "returned",
+          amountPaise: 10000,
+          idempotencyKey: key,
+        }),
+        settleUpadBalance({
+          employeeId: testWorker.id,
+          bucket: "chalu",
+          kind: "returned",
+          amountPaise: 10000,
+          idempotencyKey: key,
+        }),
+      ]);
+
+      // Exactly one succeeds, the other is rejected with "already saving"
+      const fulfilled = [res1, res2].filter((r) => r.status === "fulfilled");
+      const rejected = [res1, res2].filter((r) => r.status === "rejected");
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+      if (fulfilled[0].status === "fulfilled") {
+        createdId = fulfilled[0].value.id;
+      }
+      if (rejected[0].status === "rejected") {
+        expect(rejected[0].reason.message).toContain("already saving");
+      }
+    } finally {
+      if (createdId) await pb.collection("upad_entries").delete(createdId).catch(() => {});
+      await pb.collection("employees").delete(testWorker.id).catch(() => {});
+    }
+  });
 });
 
 function contextsWith(contexts: import("./payout-service").WorkerContext[]) {

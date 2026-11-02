@@ -34,7 +34,8 @@ import {
   Wallet,
   X,
 } from 'lucide-react'
-import { listRuns } from '../lib/api'
+import { getSettings, listRuns } from '../lib/api'
+import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
 import { pb } from '../lib/pb'
 import type { Attendance } from '../lib/types'
 
@@ -95,6 +96,11 @@ export default function PayoutScreen({
     queryFn: () => pb.collection('attendance').getFullList<Attendance>({ sort: 'date' }),
   })
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: listRuns })
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const settings = settingsQuery.data
+  const isChaluOn = isChaluUpadEnabled(settings)
+  const isMotoOn = isMotoUpadEnabled(settings)
+  const hasAnyUpad = isChaluOn || isMotoOn
 
   // Calculate live preview directly using pure calculation engine
   const preview = useMemo(() => {
@@ -122,8 +128,8 @@ export default function PayoutScreen({
         ctx.attendance.some((a) => !a.settled && a.date <= cutoff) ||
         ctx.adjustments.some((a) => !a.settled && a.date <= cutoff)
       const carryDiffers = ctx.worker.opening_carry_paise !== 0
-      const chaluBal = upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise, cutoff)
-      const motoBal = upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise, cutoff)
+      const chaluBal = isChaluOn ? upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise, cutoff) : 0
+      const motoBal = isMotoOn ? upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise, cutoff) : 0
       const included = hasActivity || carryDiffers || chaluBal !== 0 || motoBal !== 0
 
       if (!included) {
@@ -161,6 +167,7 @@ export default function PayoutScreen({
         ctx.adjustments,
         ctx.upads,
         baseMerged,
+        { chalu_enabled: isChaluOn, moto_enabled: isMotoOn },
       )
 
       if (!out.ok) {
@@ -203,6 +210,7 @@ export default function PayoutScreen({
         ctx.adjustments,
         ctx.upads,
         finalMerged,
+        { chalu_enabled: isChaluOn, moto_enabled: isMotoOn },
       )
 
       const unmarked = unmarkedDaysFor(
@@ -639,7 +647,7 @@ export default function PayoutScreen({
               const halfCount = c ? c.day_breakdown.filter((d) => d.status === 'half').length : 0
               const absentCount = c ? c.day_breakdown.filter((d) => d.status === 'absent').length : 0
               const cycleDays = c ? c.day_breakdown.length : 0
-              const daysWorked = fullCount + halfCount * 0.5
+              const daysWorked = c ? c.day_breakdown.reduce((sum, b) => sum + (b.days_worked !== undefined ? b.days_worked : b.status === 'full' ? 1 : b.status === 'half' ? 0.5 : 0), 0) : (fullCount + halfCount * 0.5)
               const otMins = c ? c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0) : 0
 
               const handleQuickSettle = () => {
@@ -939,6 +947,7 @@ export default function PayoutScreen({
 
                       <div className="space-y-2">
                         {/* Chalu Loan Card */}
+                        {isChaluOn && (
                         <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5">
@@ -995,8 +1004,10 @@ export default function PayoutScreen({
                             </div>
                           </div>
                         </div>
+                        )}
 
                         {/* Main Loan Card */}
+                        {isMotoOn && (
                         <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5">
@@ -1057,6 +1068,7 @@ export default function PayoutScreen({
                             </div>
                           </div>
                         </div>
+                        )}
                       </div>
 
                       <div className="border-t border-stone-200/90 pt-1.5 flex justify-between font-bold text-stone-900">
@@ -1384,7 +1396,7 @@ export default function PayoutScreen({
                             const fullCount = c.day_breakdown.filter((d) => d.status === 'full').length
                             const halfCount = c.day_breakdown.filter((d) => d.status === 'half').length
                             const cycleDays = c.day_breakdown.length
-                            const daysWorked = fullCount + halfCount * 0.5
+                            const daysWorked = c ? c.day_breakdown.reduce((sum, b) => sum + (b.days_worked !== undefined ? b.days_worked : b.status === 'full' ? 1 : b.status === 'half' ? 0.5 : 0), 0) : (fullCount + halfCount * 0.5)
                             const otMins = c.day_breakdown.reduce((sum, d) => sum + d.ot_minutes, 0)
                             return (
                               <span className="text-[9px] font-bold text-stone-600 bg-stone-100 px-1 rounded">

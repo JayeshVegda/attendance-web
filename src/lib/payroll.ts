@@ -7,14 +7,17 @@ import type {
   EmploymentPeriod,
   PayoutInputRow,
   RateHistory,
+  SettingsMap,
   Statement,
   UpadCategory,
   UpadEntry,
 } from './types'
 import { dateKey } from './dates'
+import { isChaluUpadEnabled, isMotoUpadEnabled } from './cycle'
 import {
   computePayout,
   dayEarnings,
+  DEFAULT_FULL_DAY_MINUTES,
   type AdjustmentKind,
   type AdjustmentRow,
   type AttendanceRow,
@@ -42,14 +45,16 @@ export function dayPayPaise(
   status: AttendanceStatus | '',
   otMinutes: number,
   dailyRatePaise: number,
-  _otDivisor = DEFAULT_OT_DIVISOR,
+  otDivisor = DEFAULT_OT_DIVISOR,
+  workedMinutes?: number,
 ): number {
-  return dayEarnings(status, otMinutes, dailyRatePaise).total_paise
+  return dayEarnings(status, otMinutes, dailyRatePaise, workedMinutes, otDivisor * 60).total_paise
 }
 
-export function statusDays(status: AttendanceStatus | ''): number {
+export function statusDays(status: AttendanceStatus | '', workedMinutes?: number): number {
   if (status === 'full') return 1
   if (status === 'half') return 0.5
+  if (status === 'hours') return (workedMinutes ?? 0) / DEFAULT_FULL_DAY_MINUTES
   return 0
 }
 
@@ -130,6 +135,7 @@ function engineDataFor(
         employee: a.employee,
         date: dateKey(a.date),
         status: a.status,
+        worked_minutes: a.worked_minutes,
         ot_minutes: a.ot_minutes ?? 0,
         settled: !!a.settled_payout,
       })),
@@ -219,6 +225,7 @@ export function computeCycleRows(args: {
   cycleStart: string
   payoutDate: string
   otDivisor?: number
+  settings?: SettingsMap
   inputs?: Map<string, Partial<PayoutInputRow>>
 }): CycleRow[] {
   const {
@@ -231,12 +238,16 @@ export function computeCycleRows(args: {
     periods = [],
     cycleStart,
     payoutDate,
+    otDivisor,
+    settings,
     inputs,
   } = args
 
   const end = dateKey(payoutDate)
   const start = dateKey(cycleStart)
   const latestStatements = latestStatementByEmployee(statements)
+  const isChaluOn = isChaluUpadEnabled(settings)
+  const isMotoOn = isMotoUpadEnabled(settings)
 
   const upadByEmployee = new Map<string, UpadEntry[]>()
   for (const entry of upadEntries) {
@@ -269,6 +280,11 @@ export function computeCycleRows(args: {
         data.adjustments,
         data.upads,
         EMPTY_INPUTS_FOR_CYCLE,
+        {
+          chalu_enabled: isChaluOn,
+          moto_enabled: isMotoOn,
+          full_day_minutes: (otDivisor ?? 8) * 60,
+        },
       )
       const res = comp.ok ? comp.result : null
       const earnedPaise = res ? res.earned_paise : 0
@@ -278,10 +294,17 @@ export function computeCycleRows(args: {
 
       const employeeUpad = upadByEmployee.get(employee.id) ?? []
       const breakdown = upadBreakdownForEmployee(employee, employeeUpad, end)
+      const regularUpad = isChaluOn ? breakdown.regularPaise : 0
+      const extraUpad = isMotoOn ? breakdown.extraPaise : 0
+      const upadOutstanding = regularUpad + extraUpad
+
       const returnedUpadPaise = employeeUpad.reduce((total, entry) => {
         const key = dateKey(entry.date)
         if (key < start || key > end || entry.kind !== 'returned') return total
         if (entry.voided) return total
+        const bucket = upadCategoryOf(entry)
+        if (bucket === 'chalu' && !isChaluOn) return total
+        if (bucket === 'moto' && !isMotoOn) return total
         return total + Math.abs(entry.amount_paise || 0)
       }, 0)
 
@@ -289,7 +312,7 @@ export function computeCycleRows(args: {
       const requestedRecovery = Math.max(0, input?.recoveryPaise ?? 0)
       const recoveryCeiling = Math.max(
         0,
-        Math.min(breakdown.regularPaise + breakdown.extraPaise, Math.max(0, beforeRecovery)),
+        Math.min(upadOutstanding, Math.max(0, beforeRecovery)),
       )
       const upadRecoveryPaise = Math.min(requestedRecovery, recoveryCeiling)
       const totalDuePaise = Math.max(0, beforeRecovery - upadRecoveryPaise)
@@ -300,7 +323,7 @@ export function computeCycleRows(args: {
       let daysWorked = 0
       let otMinutes = 0
       for (const entry of employeeAttendance) {
-        daysWorked += statusDays(entry.status)
+        daysWorked += statusDays(entry.status, entry.worked_minutes)
         otMinutes += entry.ot_minutes ?? 0
       }
 
@@ -310,17 +333,17 @@ export function computeCycleRows(args: {
         employeeAttendance.length > 0 ||
         adjustmentPaise !== 0 ||
         beforeRecovery !== 0 ||
-        breakdown.regularPaise + breakdown.extraPaise !== 0
+        upadOutstanding !== 0
 
       return {
         employee,
         openingPaise: Math.round(openingPaise),
         earnedPaise: Math.round(earnedPaise),
         adjustmentPaise: Math.round(adjustmentPaise),
-        regularUpadPaise: Math.round(breakdown.regularPaise),
-        extraUpadPaise: Math.round(breakdown.extraPaise),
+        regularUpadPaise: Math.round(regularUpad),
+        extraUpadPaise: Math.round(extraUpad),
         returnedUpadPaise: Math.round(returnedUpadPaise),
-        upadOutstandingPaise: Math.round(breakdown.regularPaise + breakdown.extraPaise),
+        upadOutstandingPaise: Math.round(upadOutstanding),
         upadRecoveryPaise: Math.round(upadRecoveryPaise),
         totalDuePaise: Math.round(totalDuePaise),
         paidPaise: Math.round(paidPaise),
@@ -375,10 +398,11 @@ export function attendanceSummary(
   attendance: Attendance[],
   cycleStart: string,
   cycleEnd: string,
-): { full: number; half: number; absent: number; otMinutes: number } {
+): { full: number; half: number; absent: number; hours: number; otMinutes: number } {
   let full = 0
   let half = 0
   let absent = 0
+  let hours = 0
   let otMinutes = 0
   for (const entry of attendance) {
     const key = dateKey(entry.date)
@@ -386,7 +410,8 @@ export function attendanceSummary(
     if (entry.status === 'full') full += 1
     if (entry.status === 'half') half += 1
     if (entry.status === 'absent') absent += 1
+    if (entry.status === 'hours') hours += 1
     otMinutes += entry.ot_minutes || 0
   }
-  return { full, half, absent, otMinutes }
+  return { full, half, absent, hours, otMinutes }
 }

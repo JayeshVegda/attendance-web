@@ -15,12 +15,13 @@ import clsx from 'clsx'
 import {
   createEmployee,
   getPayrollData,
+  getSettings,
   listEmployees,
   listRates,
   listStatements,
   listUpadEntries,
 } from '../lib/api'
-import { otDivisor } from '../lib/cycle'
+import { isChaluUpadEnabled, isMotoUpadEnabled, otDivisor } from '../lib/cycle'
 import { addDays, formatDateLong, formatDateShort, todayKey } from '../lib/dates'
 import { formatMoney, parseMoneyInput } from '../lib/money'
 import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
@@ -56,6 +57,9 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
   const ratesQuery = useQuery({ queryKey: ['rates'], queryFn: listRates })
   const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
+  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
   const today = todayKey()
   const cycleStart = useMemo(() => addDays(today, -30), [today])
   const payrollQuery = useQuery({ queryKey: ['payroll', cycleStart, today], queryFn: () => getPayrollData(cycleStart, today) })
@@ -405,6 +409,8 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
       <AddEmployeeModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
+        isChaluOn={isChaluOn}
+        isMotoOn={isMotoOn}
         onCreated={(id) => {
           queryClient.invalidateQueries({ queryKey: ['employees'] })
           queryClient.invalidateQueries({ queryKey: ['rates'] })
@@ -431,10 +437,14 @@ function AddEmployeeModal({
   open,
   onClose,
   onCreated,
+  isChaluOn,
+  isMotoOn,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (id: string) => void
+  isChaluOn: boolean
+  isMotoOn: boolean
 }) {
   const [name, setName] = useState('')
   const [employeeNo, setEmployeeNo] = useState('')
@@ -550,22 +560,26 @@ function AddEmployeeModal({
               placeholder="0"
             />
           </Field>
-          <Field label="Opening Chalu Upad (₹)" hint="Small running advance owed.">
-            <Input
-              inputMode="decimal"
-              value={openingChalu}
-              onChange={(event) => setOpeningChalu(event.target.value)}
-              placeholder="0"
-            />
-          </Field>
-          <Field label="Opening Main Upad (₹)" hint="Large/long-term advance owed.">
-            <Input
-              inputMode="decimal"
-              value={openingMoto}
-              onChange={(event) => setOpeningMoto(event.target.value)}
-              placeholder="0"
-            />
-          </Field>
+          {isChaluOn && (
+            <Field label={isMotoOn ? "Opening Chalu Upad (₹)" : "Opening Upad Balance (₹)"} hint="Current running advance owed.">
+              <Input
+                inputMode="decimal"
+                value={openingChalu}
+                onChange={(event) => setOpeningChalu(event.target.value)}
+                placeholder="0"
+              />
+            </Field>
+          )}
+          {isMotoOn && (
+            <Field label={isChaluOn ? "Opening Main Upad (₹)" : "Opening Loan Balance (₹)"} hint="Long-term loan owed.">
+              <Input
+                inputMode="decimal"
+                value={openingMoto}
+                onChange={(event) => setOpeningMoto(event.target.value)}
+                placeholder="0"
+              />
+            </Field>
+          )}
         </div>
 
         <Field label="Internal Notes" hint="Optional notes (role, machine, skills)">

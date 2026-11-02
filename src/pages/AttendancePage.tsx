@@ -36,7 +36,7 @@ import {
   saveAttendance,
 } from '../lib/api'
 import { saveCycleRows } from '../lib/payout-service'
-import { cycleStartFor, lastPayoutDate, otDivisor } from '../lib/cycle'
+import { cycleStartFor, isChaluUpadEnabled, isMotoUpadEnabled, isHoursAttendanceEnabled, hourStepMinutes, lastPayoutDate, otDivisor } from '../lib/cycle'
 import {
   addDays,
   dateKey,
@@ -50,7 +50,7 @@ import {
 } from '../lib/dates'
 import { formatHours, formatMoney, paiseToInput, parseMoneyInput } from '../lib/money'
 import { dayPayPaise, getRateForDate } from '../lib/payroll'
-import type { Adjustment, Attendance, AttendanceStatus, CycleRow, Employee, UpadCategory, UpadEntry } from '../lib/types'
+import type { Adjustment, Attendance, AttendanceStatus, CycleRow, Employee, SettingsMap, UpadCategory, UpadEntry } from '../lib/types'
 import { UpadModal } from '../components/UpadModal'
 import { useToast } from '../components/Toast'
 import {
@@ -90,18 +90,30 @@ const NEXT_STATUS: Record<string, CycleStatus> = {
   full: 'half',
   half: 'absent',
   absent: null,
+  hours: null,
 }
 
 const STATUS_LABEL: Record<AttendanceStatus, string> = {
   full: 'P',
   half: 'H',
   absent: 'A',
+  hours: 'Hrs',
 }
 
 const STATUS_NAME: Record<AttendanceStatus, string> = {
   full: 'Full day (P)',
   half: 'Half day (H)',
   absent: 'Absent (A)',
+  hours: 'Hours worked (1–7h)',
+}
+
+function formatAttendanceLabel(record?: Attendance): string {
+  if (!record || !record.status) return '—'
+  if (record.status === 'hours') {
+    const hrs = (record.worked_minutes ?? 0) / 60
+    return `${Number(hrs.toFixed(1))}h`
+  }
+  return STATUS_LABEL[record.status] || '—'
 }
 
 function blankInput(): RowInput {
@@ -115,6 +127,8 @@ function cellStyle(status?: AttendanceStatus) {
     return 'border-amber-300 bg-amber-50 text-amber-900 font-bold hover:bg-amber-100 hover:border-amber-400'
   if (status === 'absent')
     return 'border-rose-300 bg-rose-50 text-rose-900 font-bold hover:bg-rose-100 hover:border-rose-400'
+  if (status === 'hours')
+    return 'border-sky-300 bg-sky-50 text-sky-900 font-bold hover:bg-sky-100 hover:border-sky-400'
   return 'border-stone-200 bg-stone-50/60 text-stone-300 hover:border-emerald-400 hover:bg-white hover:text-stone-400'
 }
 
@@ -158,6 +172,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const [upadEmployee, setUpadEmployee] = useState<string | undefined>()
   const [cashTarget, setCashTarget] = useState<CashTarget | null>(null)
   const [workerModalRow, setWorkerModalRow] = useState<CycleRow | null>(null)
+  const [activeHoursPicker, setActiveHoursPicker] = useState<string | null>(null)
   const [workerUpadTarget, setWorkerUpadTarget] = useState<CycleRow | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -214,6 +229,10 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const employees = employeesQuery.data ?? payrollData?.employees ?? []
   const payrollSettings = payrollData?.settings ?? settingsQuery.data ?? {}
   const divisor = otDivisor(payrollSettings)
+  const isChaluOn = isChaluUpadEnabled(payrollSettings)
+  const isMotoOn = isMotoUpadEnabled(payrollSettings)
+  const isHoursOn = isHoursAttendanceEnabled(payrollSettings)
+  const stepMins = hourStepMinutes(payrollSettings)
   const rates = payrollData?.rates ?? []
   const attendance = payrollData?.attendance ?? []
 
@@ -337,6 +356,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
       employeeId: string
       date: string
       status: CycleStatus
+      workedMinutes?: number
       otMinutes: number
       existingId?: string
       note?: string
@@ -349,6 +369,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
         employeeId: input.employeeId,
         date: input.date,
         status: input.status,
+        workedMinutes: input.workedMinutes,
         otMinutes: input.otMinutes,
         existingId: input.existingId,
         note: input.note,
@@ -370,7 +391,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             ...current,
             attendance: current.attendance.map((entry) =>
               entry.id === input.existingId
-                ? { ...entry, status: input.status!, ot_minutes: input.otMinutes }
+                ? { ...entry, status: input.status!, worked_minutes: input.workedMinutes, ot_minutes: input.otMinutes }
                 : entry,
             ),
           }
@@ -380,6 +401,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           employee: input.employeeId,
           date: input.date,
           status: input.status!,
+          worked_minutes: input.workedMinutes,
           ot_minutes: input.otMinutes,
           note: input.note || '',
           created: '',
@@ -701,52 +723,53 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
               </div>
             </div>
 
-            {/* List of Workers */}
+            {/* Dense List of Workers */}
             {displayRows.map((row) => {
               const { employee } = row
               const record = attendanceMap.get(keyFor(employee.id, today))
               const status = record?.status
               const otMinutes = record?.ot_minutes ?? 0
               const isCustomOt = otMinutes > 0 && ![60, 120, 180, 240].includes(otMinutes)
+              const hasUpad = isChaluOn || isMotoOn
 
               return (
                 <div
                   key={employee.id}
                   className={clsx(
-                    'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:px-4 transition-colors hover:bg-stone-50/80',
+                    'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-1.5 px-3 sm:px-4 transition-colors hover:bg-stone-50/80',
                     !employee.active && 'bg-stone-50/40 opacity-75',
                   )}
                 >
-                  {/* Worker Info */}
-                  <div className="flex items-center gap-3 min-w-0">
+                  {/* Worker Info - Dense */}
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <Avatar name={employee.name} size="sm" />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => setWorkerModalRow(row)}
-                          className="truncate text-xs font-semibold text-stone-900 hover:text-emerald-700 text-left cursor-pointer"
+                          className="truncate text-xs font-bold text-stone-900 hover:text-emerald-700 text-left cursor-pointer"
                         >
                           {employee.name}
                         </button>
-                        <span className="text-[10px] font-medium text-stone-400">
+                        <span className="text-[10px] font-semibold text-stone-400">
                           #{employee.employee_no}
                         </span>
                         {!employee.active && (
                           <Badge tone="neutral">Inactive</Badge>
                         )}
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] font-medium text-stone-500">
-                        <span className="font-semibold text-stone-700">
+                      <div className="flex items-center gap-1.5 text-[10px] font-medium text-stone-500">
+                        <span className="font-bold text-stone-700">
                           {formatMoney(employee.daily_rate_paise)}/d
                         </span>
                         <span className="text-stone-300">·</span>
-                        <span>{row.daysWorked}d worked ({formatMoney(row.earnedPaise)})</span>
-                        {row.upadOutstandingPaise > 0 && (
+                        <span>{Number(row.daysWorked.toFixed(2))}d worked ({formatMoney(row.earnedPaise)})</span>
+                        {hasUpad && row.upadOutstandingPaise > 0 && (
                           <>
                             <span className="text-stone-300">·</span>
                             <span className="font-semibold text-amber-700">
-                              {formatMoney(row.upadOutstandingPaise)} upad
+                              {formatMoney(row.upadOutstandingPaise)} {isChaluOn && !isMotoOn ? 'chalu' : !isChaluOn && isMotoOn ? 'loan' : 'upad'}
                             </span>
                           </>
                         )}
@@ -754,8 +777,9 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                     </div>
                   </div>
 
-                  {/* 1-Tap Mark Buttons */}
-                  <div className="flex flex-wrap items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                  {/* Actions: Attendance (P, H, A, Hrs) + OT + Edit */}
+                  <div className="flex flex-wrap items-center gap-1 shrink-0 self-end sm:self-auto">
+                    {/* P button */}
                     <button
                       type="button"
                       onClick={() =>
@@ -769,16 +793,17 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         })
                       }
                       className={clsx(
-                        'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95 border select-none',
+                        'h-7 px-2.5 rounded-lg text-xs font-bold transition-all border select-none cursor-pointer flex items-center gap-1',
                         status === 'full'
-                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-xs'
+                          ? 'border-emerald-600 bg-emerald-600 text-white shadow-2xs'
                           : 'border-stone-200 bg-white text-stone-700 hover:border-emerald-300 hover:bg-emerald-50/60',
                       )}
                     >
-                      <span className="font-bold">P</span>
-                      <span>Present</span>
+                      <span>P</span>
+                      <span className="hidden md:inline font-medium text-[11px]">Present</span>
                     </button>
 
+                    {/* H button */}
                     <button
                       type="button"
                       onClick={() =>
@@ -792,16 +817,17 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         })
                       }
                       className={clsx(
-                        'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95 border select-none',
+                        'h-7 px-2.5 rounded-lg text-xs font-bold transition-all border select-none cursor-pointer flex items-center gap-1',
                         status === 'half'
-                          ? 'border-amber-600 bg-amber-600 text-white shadow-xs'
+                          ? 'border-amber-600 bg-amber-600 text-white shadow-2xs'
                           : 'border-stone-200 bg-white text-stone-700 hover:border-amber-300 hover:bg-amber-50/60',
                       )}
                     >
-                      <span className="font-bold">H</span>
-                      <span>Half</span>
+                      <span>H</span>
+                      <span className="hidden md:inline font-medium text-[11px]">Half</span>
                     </button>
 
+                    {/* A button */}
                     <button
                       type="button"
                       onClick={() =>
@@ -815,19 +841,104 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         })
                       }
                       className={clsx(
-                        'flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all active:scale-95 border select-none',
+                        'h-7 px-2.5 rounded-lg text-xs font-bold transition-all border select-none cursor-pointer flex items-center gap-1',
                         status === 'absent'
-                          ? 'border-rose-600 bg-rose-600 text-white shadow-xs'
+                          ? 'border-rose-600 bg-rose-600 text-white shadow-2xs'
                           : 'border-stone-200 bg-white text-stone-700 hover:border-rose-300 hover:bg-rose-50/60',
                       )}
                     >
-                      <span className="font-bold">A</span>
-                      <span>Absent</span>
+                      <span>A</span>
+                      <span className="hidden md:inline font-medium text-[11px]">Absent</span>
                     </button>
 
+                    {/* Hrs button & Popover */}
+                    {isHoursOn && (
+                      <div className="relative inline-flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveHoursPicker(activeHoursPicker === employee.id ? null : employee.id)
+                          }}
+                          className={clsx(
+                            'h-7 px-2.5 rounded-lg text-xs font-bold transition-all border select-none cursor-pointer flex items-center gap-1',
+                            status === 'hours'
+                              ? 'border-sky-600 bg-sky-600 text-white shadow-2xs'
+                              : 'border-stone-200 bg-white text-stone-700 hover:border-sky-300 hover:bg-sky-50/60',
+                          )}
+                          title="Hours worked (1–7h)"
+                        >
+                          {status === 'hours' ? `${Number(((record?.worked_minutes || 0) / 60).toFixed(1))}h` : 'Hrs'}
+                        </button>
+
+                        {activeHoursPicker === employee.id && (
+                          <div className="absolute right-0 top-8 z-30 flex items-center gap-1 p-1.5 rounded-xl border border-stone-200 bg-white shadow-lg animate-in fade-in zoom-in-95">
+                            <span className="px-1 text-[10px] font-extrabold uppercase text-stone-400">Hours:</span>
+                            {[1, 2, 3, 4, 5, 6, 7].map((h) => {
+                              const mins = h * 60
+                              const isSelected = status === 'hours' && record?.worked_minutes === mins
+                              return (
+                                <button
+                                  key={h}
+                                  type="button"
+                                  onClick={() => {
+                                    saveMutation.mutate({
+                                      employeeId: employee.id,
+                                      date: today,
+                                      status: 'hours',
+                                      workedMinutes: mins,
+                                      otMinutes: record?.ot_minutes ?? 0,
+                                      existingId: record?.id,
+                                      note: record?.note,
+                                    })
+                                    setActiveHoursPicker(null)
+                                  }}
+                                  className={clsx(
+                                    'h-6 w-6 rounded-md text-xs font-black transition cursor-pointer flex items-center justify-center',
+                                    isSelected
+                                      ? 'bg-sky-600 text-white'
+                                      : 'bg-stone-100 text-stone-700 hover:bg-sky-100 hover:text-sky-800'
+                                  )}
+                                >
+                                  {h}
+                                </button>
+                              )
+                            })}
+                            <div className="border-l border-stone-200 pl-1 flex items-center gap-1">
+                              <input
+                                type="number"
+                                min="1"
+                                max="7"
+                                step={stepMins === 60 ? '1' : '0.5'}
+                                placeholder="h"
+                                autoFocus
+                                className="h-6 w-10 rounded border border-stone-300 px-1 text-center text-xs font-bold text-stone-800 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const val = Number.parseFloat((e.target as HTMLInputElement).value)
+                                    if (val > 0 && val < 8) {
+                                      saveMutation.mutate({
+                                        employeeId: employee.id,
+                                        date: today,
+                                        status: 'hours',
+                                        workedMinutes: Math.round(val * 60),
+                                        otMinutes: record?.ot_minutes ?? 0,
+                                        existingId: record?.id,
+                                        note: record?.note,
+                                      })
+                                      setActiveHoursPicker(null)
+                                    }
+                                  }
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* OT Options: 1, 2, 3, 4, +OT */}
-                    <div className="inline-flex items-center rounded-xl border border-stone-200 bg-stone-50/80 p-0.5 shrink-0 shadow-2xs">
-                      <span className="px-1.5 text-[10px] font-extrabold uppercase tracking-wider text-stone-400 select-none hidden sm:inline">
+                    <div className="inline-flex items-center rounded-lg border border-stone-200 bg-stone-50/80 p-0.5 shrink-0">
+                      <span className="px-1 text-[9px] font-extrabold uppercase text-stone-400 select-none hidden lg:inline">
                         OT
                       </span>
                       {[1, 2, 3, 4].map((hours) => {
@@ -843,18 +954,19 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                                 employeeId: employee.id,
                                 date: today,
                                 status: record?.status === 'absent' || !record?.status ? 'full' : record.status,
+                                workedMinutes: record?.worked_minutes,
                                 otMinutes: nextOt,
                                 existingId: record?.id,
                                 note: record?.note,
                               })
                             }}
                             className={clsx(
-                              'h-7 min-w-[1.75rem] px-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center select-none cursor-pointer',
+                              'h-6 min-w-[1.5rem] px-1 rounded text-[11px] font-bold transition-all flex items-center justify-center select-none cursor-pointer',
                               isSelected
-                                ? 'bg-stone-900 text-white shadow-xs'
+                                ? 'bg-stone-900 text-white shadow-2xs'
                                 : 'text-stone-700 hover:bg-stone-200/80 hover:text-stone-950',
                             )}
-                            title={`${hours} hr OT (${minutes}m) · Click to ${isSelected ? 'remove' : 'apply'}`}
+                            title={`${hours} hr OT (${minutes}m)`}
                           >
                             {hours}
                           </button>
@@ -865,9 +977,9 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                         type="button"
                         onClick={() => setEditor({ employeeId: employee.id, date: today })}
                         className={clsx(
-                          'h-7 rounded-lg px-2 text-xs font-bold transition-all flex items-center justify-center gap-1 border-l border-stone-200/80 select-none cursor-pointer',
+                          'h-6 rounded px-1.5 text-[11px] font-bold transition-all flex items-center justify-center gap-1 border-l border-stone-200/80 select-none cursor-pointer',
                           isCustomOt
-                            ? 'bg-stone-900 text-white shadow-xs'
+                            ? 'bg-stone-900 text-white shadow-2xs'
                             : 'text-stone-600 hover:bg-stone-200/80 hover:text-stone-900',
                         )}
                         title={record?.note ? `Note: ${record.note}` : 'Custom OT & note'}
@@ -885,14 +997,26 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                     </div>
 
                     {/* Quick Give Upad */}
+                    {hasUpad && (
+                      <button
+                        type="button"
+                        onClick={() => setWorkerUpadTarget(row)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100/80 transition shrink-0"
+                        title="Manage Upad"
+                      >
+                        <HandCoins className="h-3.5 w-3.5" />
+                        <span className="text-[10px] font-bold hidden sm:inline">+ Upad</span>
+                      </button>
+                    )}
+
+                    {/* Full Cell / Day Editor */}
                     <button
                       type="button"
-                      onClick={() => setWorkerUpadTarget(row)}
-                      className="inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100/80 transition shrink-0"
-                      title="Manage Upad"
+                      onClick={() => setEditor({ employeeId: employee.id, date: today })}
+                      className="h-7 w-7 rounded-lg border border-stone-200 bg-white text-stone-400 hover:text-stone-700 hover:border-stone-300 flex items-center justify-center transition"
+                      title="Edit attendance details"
                     >
-                      <HandCoins className="h-3.5 w-3.5" />
-                      <span className="text-[10px] font-bold hidden sm:inline">+ Upad</span>
+                      <Pencil className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
@@ -1147,7 +1271,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                                     )}
                                   >
                                     <span className="text-xs font-bold leading-tight flex items-center gap-0.5">
-                                      {record ? STATUS_LABEL[record.status] : '—'}
+                                      {formatAttendanceLabel(record)}
                                       <Lock className="h-2.5 w-2.5 text-stone-400" />
                                     </span>
                                     {hasOt && (
@@ -1172,7 +1296,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
                                     )}
                                   >
                                     <span className="text-xs font-bold leading-tight">
-                                      {record ? STATUS_LABEL[record.status] : '—'}
+                                      {formatAttendanceLabel(record)}
                                     </span>
 
                                     {/* Clean OT Pill */}
@@ -1346,6 +1470,10 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             <strong className="text-stone-800">A</strong> = Absent
           </span>
           <span className="inline-flex items-center gap-1.5 font-semibold">
+            <span className="h-3 w-3 rounded-md border border-sky-400 bg-sky-100" />
+            <strong className="text-stone-800">3h</strong> = Hours (1–7h)
+          </span>
+          <span className="inline-flex items-center gap-1.5 font-semibold">
             <span className="h-3 w-3 rounded-md border border-stone-300 bg-stone-50" />
             <strong className="text-stone-800">—</strong> = Blank (no pay)
           </span>
@@ -1486,6 +1614,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           row={cashRow}
           initialCategory={cashTarget.category}
           payoutDate={payoutDate}
+          settings={payrollSettings}
         />
       )}
 
@@ -1657,6 +1786,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           periods={payrollData?.periods?.filter((p) => p.employee === workerModalRow.employee.id) ?? []}
           statements={payrollData?.statements ?? []}
           adjustments={payrollData?.adjustments?.filter((a) => a.employee === workerModalRow.employee.id) ?? []}
+          settings={payrollSettings}
           onUpdateRowInput={(patch) => setRowInput(workerModalRow.employee.id, patch)}
           currentInput={entries[workerModalRow.employee.id] ?? blankInput()}
           onOpenUpad={() => {
@@ -1677,6 +1807,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           upadEntries={payrollData?.upadEntries?.filter((u) => u.employee === workerUpadTarget.employee.id) ?? []}
           onUpdateRecovery={(amount) => setRowInput(workerUpadTarget.employee.id, { recovery: amount })}
           currentRecovery={entries[workerUpadTarget.employee.id]?.recovery ?? ''}
+          settings={payrollSettings}
         />
       )}
 
@@ -1721,6 +1852,7 @@ function WorkerUpadModal({
   upadEntries,
   onUpdateRecovery,
   currentRecovery,
+  settings,
 }: {
   open: boolean
   onClose: () => void
@@ -1729,11 +1861,14 @@ function WorkerUpadModal({
   upadEntries: UpadEntry[]
   onUpdateRecovery: (amount: string) => void
   currentRecovery: string
+  settings?: SettingsMap
 }) {
+  const isChaluOn = isChaluUpadEnabled(settings)
+  const isMotoOn = isMotoUpadEnabled(settings)
   const [mode, setMode] = useState<'give' | 'recover'>('give')
 
   // Give Upad Form
-  const [giveCategory, setGiveCategory] = useState<UpadCategory>('regular')
+  const [giveCategory, setGiveCategory] = useState<UpadCategory>(isChaluOn ? 'regular' : 'extra')
   const [giveAmount, setGiveAmount] = useState('')
   const [giveNote, setGiveNote] = useState('')
   const [giveError, setGiveError] = useState('')
@@ -1850,8 +1985,16 @@ function WorkerUpadModal({
             </div>
           </div>
           <div className="text-right text-xs font-medium text-amber-900/80">
-            <div>Chalu: {formatMoney(row.regularUpadPaise)}</div>
-            {row.extraUpadPaise > 0 && <div>Main: {formatMoney(row.extraUpadPaise)}</div>}
+            {isChaluOn && isMotoOn ? (
+              <>
+                <div>Chalu: {formatMoney(row.regularUpadPaise)}</div>
+                {row.extraUpadPaise > 0 && <div>Main: {formatMoney(row.extraUpadPaise)}</div>}
+              </>
+            ) : isMotoOn ? (
+              <div>Loan: {formatMoney(row.extraUpadPaise)}</div>
+            ) : (
+              <div>Upad: {formatMoney(row.regularUpadPaise)}</div>
+            )}
           </div>
         </div>
 
@@ -2172,7 +2315,10 @@ function AttendanceEditor({
   ratePaise: number
   divisor: number
 }) {
-  const [status, setStatus] = useState<CycleStatus>(record?.status ?? 'full')
+  const [status, setStatus] = useState<AttendanceStatus | null>(record?.status ?? 'full')
+  const [workedHours, setWorkedHours] = useState(
+    record?.status === 'hours' && record.worked_minutes ? String(record.worked_minutes / 60) : '3'
+  )
   const [ot, setOt] = useState(String(record?.ot_minutes ?? 0))
   const [note, setNote] = useState(record?.note ?? '')
   const toast = useToast()
@@ -2184,10 +2330,13 @@ function AttendanceEditor({
         if (record) await deleteAttendance(record.id)
         return
       }
+      const parsedHours = Number.parseFloat(workedHours) || 3
+      const wm = status === 'hours' ? Math.round(parsedHours * 60) : undefined
       await saveAttendance({
         employeeId: employee.id,
         date,
         status,
+        workedMinutes: wm,
         otMinutes: Math.max(0, Number.parseInt(ot, 10) || 0),
         existingId: record && !record.id.startsWith('temp-') ? record.id : undefined,
         note,
@@ -2203,7 +2352,9 @@ function AttendanceEditor({
   })
 
   const otMinutes = Math.max(0, Number.parseInt(ot, 10) || 0)
-  const pay = dayPayPaise(status || '', otMinutes, ratePaise, divisor)
+  const parsedHours = Number.parseFloat(workedHours) || 3
+  const wm = status === 'hours' ? Math.round(parsedHours * 60) : undefined
+  const pay = dayPayPaise(status || '', otMinutes, ratePaise, divisor, wm)
 
   return (
     <Modal
@@ -2236,28 +2387,70 @@ function AttendanceEditor({
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-2.5">
-          {(['full', 'half', 'absent'] as AttendanceStatus[]).map((value) => (
+        <div className="grid grid-cols-4 gap-2">
+          {(['full', 'half', 'absent', 'hours'] as AttendanceStatus[]).map((value) => (
             <button
               key={value}
               type="button"
               onClick={() => setStatus(value)}
               className={clsx(
-                'rounded-2xl border p-3 text-center transition-all',
+                'rounded-2xl border p-2.5 text-center transition-all',
                 status === value
                   ? value === 'full'
                     ? 'border-emerald-500 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-500/20'
                     : value === 'half'
                       ? 'border-amber-500 bg-amber-50 text-amber-900 ring-2 ring-amber-500/20'
-                      : 'border-rose-500 bg-rose-50 text-rose-900 ring-2 ring-rose-500/20'
+                      : value === 'absent'
+                        ? 'border-rose-500 bg-rose-50 text-rose-900 ring-2 ring-rose-500/20'
+                        : 'border-sky-500 bg-sky-50 text-sky-900 ring-2 ring-sky-500/20'
                   : 'border-stone-200 bg-white text-stone-600 hover:border-stone-300',
               )}
             >
-              <div className="text-xl font-black">{STATUS_LABEL[value]}</div>
-              <div className="mt-0.5 text-xs font-bold">{STATUS_NAME[value]}</div>
+              <div className="text-lg font-black">{STATUS_LABEL[value]}</div>
+              <div className="mt-0.5 text-[11px] font-bold">
+                {value === 'hours' ? 'Hours' : STATUS_NAME[value].split(' ')[0]}
+              </div>
             </button>
           ))}
         </div>
+
+        {status === 'hours' && (
+          <div className="rounded-2xl border border-sky-200 bg-sky-50/60 p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-sky-950">Worked Hours (1 to 7)</span>
+              <span className="text-xs font-bold text-sky-700">{parsedHours} hrs ({Math.round(parsedHours * 60)} min)</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {[1, 2, 3, 4, 5, 6, 7].map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => setWorkedHours(String(h))}
+                  className={clsx(
+                    'h-7 min-w-[2rem] px-2 rounded-lg text-xs font-bold transition border cursor-pointer',
+                    Number.parseFloat(workedHours) === h
+                      ? 'border-sky-600 bg-sky-600 text-white shadow-2xs'
+                      : 'border-sky-200 bg-white text-sky-900 hover:bg-sky-100',
+                  )}
+                >
+                  {h}h
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-[11px] text-stone-500 font-medium">Or type exact hours:</span>
+              <Input
+                type="number"
+                min={0.5}
+                max={7.5}
+                step={0.5}
+                value={workedHours}
+                onChange={(e) => setWorkedHours(e.target.value)}
+                className="w-24 text-center text-xs font-bold"
+              />
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Overtime Minutes" hint={`Based on ${divisor}h shift.`}>
@@ -2327,6 +2520,7 @@ function CashReturnModal({
   row,
   initialCategory,
   payoutDate,
+  settings,
 }: {
   open: boolean
   onClose: () => void
@@ -2334,8 +2528,12 @@ function CashReturnModal({
   row: CycleRow
   initialCategory: UpadCategory
   payoutDate: string
+  settings?: SettingsMap
 }) {
-  const [category, setCategory] = useState<UpadCategory>(initialCategory)
+  const isChaluOn = isChaluUpadEnabled(settings)
+  const isMotoOn = isMotoUpadEnabled(settings)
+  const effectiveInitial = !isChaluOn ? 'extra' : !isMotoOn ? 'regular' : initialCategory
+  const [category, setCategory] = useState<UpadCategory>(effectiveInitial)
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [error, setError] = useState('')
@@ -2404,35 +2602,37 @@ function CashReturnModal({
       }
     >
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-2.5">
-          {(['regular', 'extra'] as UpadCategory[]).map((value) => {
-            const valueBalance = value === 'regular' ? row.regularUpadPaise : row.extraUpadPaise
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() => {
-                  setCategory(value)
-                  setAmount('')
-                  setError('')
-                }}
-                className={clsx(
-                  'rounded-2xl border p-3 text-left transition',
-                  category === value
-                    ? 'border-sky-600 bg-sky-50 ring-2 ring-sky-600/20'
-                    : 'border-stone-200 bg-white hover:border-stone-300',
-                )}
-              >
-                <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
-                  {value === 'regular' || value === 'chalu' ? 'Chalu Upad' : 'Main Upad'}
-                </div>
-                <div className="mt-0.5 text-base font-black text-stone-900 tabular-nums">
-                  {formatMoney(valueBalance, { showZero: true })}
-                </div>
-              </button>
-            )
-          })}
-        </div>
+        {isChaluOn && isMotoOn && (
+          <div className="grid grid-cols-2 gap-2.5">
+            {(['regular', 'extra'] as UpadCategory[]).map((value) => {
+              const valueBalance = value === 'regular' ? row.regularUpadPaise : row.extraUpadPaise
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setCategory(value)
+                    setAmount('')
+                    setError('')
+                  }}
+                  className={clsx(
+                    'rounded-2xl border p-3 text-left transition',
+                    category === value
+                      ? 'border-sky-600 bg-sky-50 ring-2 ring-sky-600/20'
+                      : 'border-stone-200 bg-white hover:border-stone-300',
+                  )}
+                >
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
+                    {value === 'regular' || value === 'chalu' ? 'Chalu Upad' : 'Main Upad'}
+                  </div>
+                  <div className="mt-0.5 text-base font-black text-stone-900 tabular-nums">
+                    {formatMoney(valueBalance, { showZero: true })}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         <Field
           label="Amount Returned (₹)"

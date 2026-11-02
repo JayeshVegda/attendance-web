@@ -12,7 +12,9 @@ import {
   Users,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { listEmployees, listUpadEntries } from '../lib/api'
+import { getSettings, listEmployees, listUpadEntries } from '../lib/api'
+import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { SettleModal, type SettleTarget } from '../components/SettleModal'
 import { dateKey, daysBetweenInclusive, formatDateShort, monthKey, todayKey } from '../lib/dates'
 import { formatMoney } from '../lib/money'
 import { upadBreakdownForEmployee } from '../lib/payroll'
@@ -48,6 +50,10 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
 
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const [settleTarget, setSettleTarget] = useState<SettleTarget | null>(null)
+  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
+  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
 
   const employees = employeesQuery.data ?? []
   const entries = upadQuery.data ?? []
@@ -261,7 +267,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                         {formatMoney(balance)}
                       </div>
                       <div className="text-[10px] font-bold text-stone-500">
-                        Chalu {formatMoney(chalu)} · Main {formatMoney(moto)}
+                        {isChaluOn && isMotoOn ? `Chalu ${formatMoney(chalu)} · Main ${formatMoney(moto)}` : isMotoOn ? `Loan: ${formatMoney(moto)}` : `Upad: ${formatMoney(chalu)}`}
                       </div>
                     </div>
                   </div>
@@ -404,7 +410,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                             {KIND_LABEL[entry.kind]}
                           </Badge>
                           <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-700">
-                            {entry.category === 'extra' || entry.category === 'moto' ? 'Main Upad' : 'Chalu Upad'}
+                            {isChaluOn && isMotoOn ? (entry.category === 'extra' || entry.category === 'moto' ? 'Main Upad' : 'Chalu Upad') : isMotoOn ? 'Loan' : 'Upad'}
                           </span>
                         </div>
                       </td>
@@ -462,6 +468,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
         Note: Cash returned and payout salary recovery both reduce outstanding upad.
       </div>
 
+      <SettleModal target={settleTarget} onClose={() => setSettleTarget(null)} />
       <UpadModal
         open={upadOpen}
         onClose={() => setUpadOpen(false)}

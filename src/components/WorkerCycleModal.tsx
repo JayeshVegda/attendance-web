@@ -19,6 +19,8 @@ import { formatDateLong, formatDateShort, parseDate } from '../lib/dates'
 import { formatHours, formatMoney, paiseToInput, parseMoneyInput } from '../lib/money'
 import { latestStatementByEmployee } from '../lib/payroll'
 import { createUpadEntry } from '../lib/api'
+import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { SettleModal, type SettleTarget } from './SettleModal'
 import type {
   Adjustment,
   Attendance,
@@ -50,6 +52,7 @@ export function WorkerCycleModal({
   periods = [],
   statements = [],
   adjustments = [],
+  settings,
   currentInput,
   onUpdateRowInput,
   onOpenUpad,
@@ -65,6 +68,7 @@ export function WorkerCycleModal({
   periods?: EmploymentPeriod[]
   statements?: Statement[]
   adjustments?: Adjustment[]
+  settings?: Record<string, string>
   currentInput: RowInput
   onUpdateRowInput: (patch: Partial<RowInput>) => void
   onOpenUpad: () => void
@@ -73,6 +77,11 @@ export function WorkerCycleModal({
   const toast = useToast()
   const [isSaving, setIsSaving] = useState(false)
   const [activePopoverDate, setActivePopoverDate] = useState<string | null>(null)
+  const [settleTarget, setSettleTarget] = useState<SettleTarget | null>(null)
+
+  const isChaluOn = isChaluUpadEnabled(settings)
+  const isMotoOn = isMotoUpadEnabled(settings)
+  const hasAnyUpad = isChaluOn || isMotoOn
 
   // Settlement Inputs
   const [chaluCut, setChaluCut] = useState(() => currentInput.chaluRecovery ?? currentInput.recovery ?? '')
@@ -115,6 +124,7 @@ export function WorkerCycleModal({
         employee: a.employee,
         date: (a.date ?? '').slice(0, 10),
         status: (a.status ?? '') as DayStatus,
+        worked_minutes: a.worked_minutes,
         ot_minutes: a.ot_minutes ?? 0,
         settled: !!a.settled_payout,
       })),
@@ -180,6 +190,7 @@ export function WorkerCycleModal({
         engineAdjustments,
         engineUpads,
         baseInputs,
+        { chalu_enabled: isChaluOn, moto_enabled: isMotoOn },
       ),
     [worker, paidUpToDate, payoutDate, engineRates, enginePeriods, engineAttendance, engineAdjustments, engineUpads, baseInputs],
   )
@@ -209,6 +220,7 @@ export function WorkerCycleModal({
         engineAdjustments,
         engineUpads,
         finalInputs,
+        { chalu_enabled: isChaluOn, moto_enabled: isMotoOn },
       ),
     [worker, paidUpToDate, payoutDate, engineRates, enginePeriods, engineAttendance, engineAdjustments, engineUpads, finalInputs],
   )
@@ -243,7 +255,7 @@ export function WorkerCycleModal({
   // Section 1: Week Strip Data
   const dayBreakdown = finalComp?.day_breakdown ?? []
   const daysWorkedCount = dayBreakdown.reduce(
-    (sum, d) => sum + (d.status === 'full' ? 1 : d.status === 'half' ? 0.5 : 0),
+    (sum, d) => sum + (d.days_worked !== undefined ? d.days_worked : d.status === 'full' ? 1 : d.status === 'half' ? 0.5 : d.status === 'hours' ? ((d.worked_minutes ?? 0) / 480) : 0),
     0,
   )
   const totalOtMins = dayBreakdown.reduce((sum, d) => sum + d.ot_minutes, 0)
@@ -333,6 +345,7 @@ export function WorkerCycleModal({
         </div>
       }
     >
+      <SettleModal target={settleTarget} onClose={() => setSettleTarget(null)} />
       <div className="space-y-4 text-stone-800 select-text">
         {/* Section 1 - WEEK STRIP */}
         <div className="rounded-2xl border border-stone-200 bg-white p-4 space-y-3 shadow-2xs">
@@ -353,8 +366,10 @@ export function WorkerCycleModal({
               const isHalf = d.status === 'half'
               const isAbsent = d.status === 'absent'
               const isOff = !d.status
+              const isHours = d.status === 'hours'
+              const hoursText = isHours ? `${Number(((d.worked_minutes || 0) / 60).toFixed(1))}h` : ''
               const otHours = d.ot_minutes > 0 ? (d.ot_minutes % 60 === 0 ? `${d.ot_minutes / 60}h` : formatHours(d.ot_minutes)) : ''
-              const statusLabel = isFull ? 'Present' : isHalf ? 'Half Day' : isAbsent ? 'Absent' : 'Off'
+              const statusLabel = isFull ? 'Present' : isHalf ? 'Half Day' : isAbsent ? 'Absent' : isHours ? `${hoursText} Worked` : 'Off'
 
               const dayDate = parseDate(d.date)
               const dayNum = isNaN(dayDate.getTime()) ? d.date.slice(8, 10) : dayDate.getDate()
@@ -363,7 +378,11 @@ export function WorkerCycleModal({
 
               // Filter upads on this date
               const dayUpads = upadEntries.filter(
-                (u) => (u.date ?? '').slice(0, 10) === d.date && !u.voided,
+                (u) =>
+                  (u.date ?? '').slice(0, 10) === d.date &&
+                  !u.voided &&
+                  ((isChaluOn && (u.category === 'chalu' || u.category === 'regular' || u.bucket === 'chalu')) ||
+                    (isMotoOn && (u.category === 'moto' || u.category === 'extra' || u.bucket === 'moto'))),
               )
               const isSelected = activePopoverDate === d.date
 
@@ -397,10 +416,11 @@ export function WorkerCycleModal({
                         isFull && otHours && 'bg-emerald-100 text-emerald-950 border border-emerald-400/80',
                         isHalf && 'bg-amber-100/80 text-amber-900 border border-amber-300/80',
                         isAbsent && 'bg-rose-100/80 text-rose-900 border border-rose-300/80',
+                        isHours && 'bg-sky-100 text-sky-950 border border-sky-300',
                         isOff && 'bg-stone-100 text-stone-600 border border-stone-200',
                       )}
                     >
-                      <span>{isFull ? 'P' : isHalf ? 'H' : isAbsent ? 'A' : '—'}</span>
+                      <span>{isFull ? 'P' : isHalf ? 'H' : isAbsent ? 'A' : isHours ? hoursText : '—'}</span>
                       {otHours && <span className="font-black text-emerald-900">+{otHours}</span>}
                     </span>
                   </div>
@@ -504,7 +524,7 @@ export function WorkerCycleModal({
         </div>
 
         {/* Section 2 - Financial Summary KPI Row */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className={clsx('grid gap-3', isChaluOn && isMotoOn ? 'grid-cols-3' : hasAnyUpad ? 'grid-cols-2' : 'grid-cols-1')}>
           <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
             <div className="text-xs font-semibold text-stone-600">
               Gross Due
@@ -517,39 +537,89 @@ export function WorkerCycleModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-stone-600">Chalu Upad Balance</span>
-              {chaluBal > 0 && (
-                <span className="rounded bg-amber-50 text-amber-900 border border-amber-200/70 px-1.5 py-0.2 text-[10px] font-bold">
-                  Active
+          {isChaluOn && (
+            <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-stone-600">
+                  {isMotoOn ? 'Chalu Upad Balance' : 'Upad Balance'}
                 </span>
-              )}
+                <div className="flex items-center gap-1.5">
+                  {chaluBal > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSettleTarget({
+                          mode: 'single',
+                          workerId: row.employee.id,
+                          workerName: row.employee.name,
+                          workerNo: row.employee.employee_no,
+                          bucket: 'chalu',
+                          balancePaise: chaluBal,
+                        })
+                      }
+                      className="rounded bg-amber-100 hover:bg-amber-200 text-amber-900 px-1.5 py-0.5 text-[10px] font-bold cursor-pointer transition"
+                      title="Settle or write off balance"
+                    >
+                      Settle
+                    </button>
+                  )}
+                  {chaluBal > 0 && (
+                    <span className="rounded bg-amber-50 text-amber-900 border border-amber-200/70 px-1.5 py-0.2 text-[10px] font-bold">
+                      Active
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="my-1 text-2xl font-black text-amber-950 tabular-nums tracking-tight">
+                {formatMoney(chaluBal)}
+              </div>
+              <div className="text-xs text-stone-500 font-normal">
+                Current weekly advance
+              </div>
             </div>
-            <div className="my-1 text-2xl font-black text-amber-950 tabular-nums tracking-tight">
-              {formatMoney(chaluBal)}
-            </div>
-            <div className="text-xs text-stone-500 font-normal">
-              Current weekly advance
-            </div>
-          </div>
+          )}
 
-          <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-stone-600">Main Loan Balance</span>
-              {motoBal > 0 && (
-                <span className="rounded bg-purple-50 text-purple-900 border border-purple-200/70 px-1.5 py-0.2 text-[10px] font-bold">
-                  Loan
+          {isMotoOn && (
+            <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-stone-600">
+                  {isChaluOn ? 'Main Loan Balance' : 'Loan Balance'}
                 </span>
-              )}
+                <div className="flex items-center gap-1.5">
+                  {motoBal > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSettleTarget({
+                          mode: 'single',
+                          workerId: row.employee.id,
+                          workerName: row.employee.name,
+                          workerNo: row.employee.employee_no,
+                          bucket: 'moto',
+                          balancePaise: motoBal,
+                        })
+                      }
+                      className="rounded bg-purple-100 hover:bg-purple-200 text-purple-900 px-1.5 py-0.5 text-[10px] font-bold cursor-pointer transition"
+                      title="Settle or write off balance"
+                    >
+                      Settle
+                    </button>
+                  )}
+                  {motoBal > 0 && (
+                    <span className="rounded bg-purple-50 text-purple-900 border border-purple-200/70 px-1.5 py-0.2 text-[10px] font-bold">
+                      Loan
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="my-1 text-2xl font-black text-purple-950 tabular-nums tracking-tight">
+                {formatMoney(motoBal)}
+              </div>
+              <div className="text-xs text-stone-500 font-normal">
+                Long-term loan account
+              </div>
             </div>
-            <div className="my-1 text-2xl font-black text-purple-950 tabular-nums tracking-tight">
-              {formatMoney(motoBal)}
-            </div>
-            <div className="text-xs text-stone-500 font-normal">
-              Long-term loan account
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Section 3 - Settlement Inputs & Handover */}
@@ -563,10 +633,10 @@ export function WorkerCycleModal({
               </span>
             </div>
 
-            {/* Chalu Cut */}
+{isChaluOn && (
             <div>
               <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
-                <span>Chalu Loan Cut:</span>
+                <span>{isMotoOn ? 'Chalu Loan Cut:' : 'Loan Cut:'}</span>
                 <button
                   type="button"
                   onClick={() => setChaluCut(paiseToInput(Math.min(chaluBal, grossDue)))}
@@ -592,11 +662,12 @@ export function WorkerCycleModal({
                 </p>
               )}
             </div>
+            )}
 
-            {/* Main Cut */}
+{isMotoOn && (
             <div>
               <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
-                <span>Main Loan Cut:</span>
+                <span>{isChaluOn ? 'Main Loan Cut:' : 'Loan Cut:'}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -625,6 +696,7 @@ export function WorkerCycleModal({
                 </p>
               )}
             </div>
+            )}
           </div>
 
           {/* Right Column: Salary Paid & Fresh Advance */}

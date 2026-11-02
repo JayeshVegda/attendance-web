@@ -22,6 +22,7 @@ import {
 import clsx from 'clsx'
 import {
   addRate,
+  getSettings,
   listAdjustments,
   listAttendance,
   listEmployees,
@@ -33,6 +34,7 @@ import {
   setEmployeeActive,
   updateEmployee,
 } from '../lib/api'
+import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
 import {
   addDays,
   formatDateLong,
@@ -76,6 +78,7 @@ const STATUS_TONE = {
   full: 'green',
   half: 'amber',
   absent: 'red',
+  hours: 'blue',
 } as const
 
 export default function EmployeeDetailPage({
@@ -99,6 +102,9 @@ export default function EmployeeDetailPage({
 
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
   const ratesQuery = useQuery({ queryKey: ['rates'], queryFn: listRates })
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
+  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
   const periodsQuery = useQuery({ queryKey: ['periods'], queryFn: listPeriods })
   const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
@@ -471,7 +477,7 @@ export default function EmployeeDetailPage({
               {formatMoney(upadBalance, { showZero: true })}
             </div>
             <div className="text-[10px] font-bold text-stone-500 mt-0.5">
-              Chalu {formatMoney(upadBreakdown.chaluPaise)} · Main {formatMoney(upadBreakdown.motoPaise)}
+              {isChaluOn && isMotoOn ? `Chalu ${formatMoney(upadBreakdown.chaluPaise)} · Main ${formatMoney(upadBreakdown.motoPaise)}` : isMotoOn ? `Loan: ${formatMoney(upadBreakdown.motoPaise)}` : `Upad: ${formatMoney(upadBreakdown.chaluPaise)}`}
             </div>
           </div>
           <div>
@@ -918,28 +924,32 @@ export default function EmployeeDetailPage({
                 >
                   All Accounts ({formatMoney(upadBalance)})
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setUpadLedgerCategory('chalu')}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
-                    upadLedgerCategory === 'chalu'
-                      ? 'bg-amber-800 text-white'
-                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
-                  }`}
-                >
-                  Chalu Upad ({formatMoney(upadBreakdown.chaluPaise)})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUpadLedgerCategory('moto')}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
-                    upadLedgerCategory === 'moto'
-                      ? 'bg-purple-800 text-white'
-                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
-                  }`}
-                >
-                  Main Upad ({formatMoney(upadBreakdown.motoPaise)})
-                </button>
+                {isChaluOn && (
+                  <button
+                    type="button"
+                    onClick={() => setUpadLedgerCategory('chalu')}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                      upadLedgerCategory === 'chalu'
+                        ? 'bg-amber-800 text-white'
+                        : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    {isMotoOn ? 'Chalu Upad' : 'Upad'} ({formatMoney(upadBreakdown.chaluPaise)})
+                  </button>
+                )}
+                {isMotoOn && (
+                  <button
+                    type="button"
+                    onClick={() => setUpadLedgerCategory('moto')}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                      upadLedgerCategory === 'moto'
+                        ? 'bg-purple-800 text-white'
+                        : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    {isChaluOn ? 'Main Upad' : 'Loan'} ({formatMoney(upadBreakdown.motoPaise)})
+                  </button>
+                )}
               </div>
 
               <div className="text-xs font-bold text-stone-600">

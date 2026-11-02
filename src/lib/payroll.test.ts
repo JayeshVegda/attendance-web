@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeCycleRows, dayPayPaise } from './payroll'
+import { computeCycleRows, dayPayPaise, statusDays } from './payroll'
 import type { Attendance, Employee, RateHistory, Statement, UpadEntry } from './types'
 
 const employee: Employee = {
@@ -163,5 +163,80 @@ describe('payroll engine', () => {
 
     expect(rows[0].earnedPaise).toBe(90000)
     expect(rows[0].attendanceCount).toBe(1)
+  })
+
+  it('computes days_worked and dayPayPaise for hours attendance', () => {
+    expect(statusDays('hours', 180)).toBe(0.375)
+    expect(statusDays('hours', 60)).toBe(0.125)
+    expect(statusDays('hours', 240)).toBe(0.5)
+    expect(statusDays('hours', 480)).toBe(1)
+    expect(statusDays('full')).toBe(1)
+    expect(statusDays('half')).toBe(0.5)
+    expect(statusDays('absent')).toBe(0)
+
+    // Pay for 3h at ₹500/day
+    expect(dayPayPaise('hours', 0, 50000, 8, 180)).toBe(18750)
+    // Pay for 3h + 1h OT at ₹500/day
+    expect(dayPayPaise('hours', 60, 50000, 8, 180)).toBe(25000)
+  })
+
+  it('aggregates fractional days_worked in cycle rows for hours attendance', () => {
+    const att1: Attendance = {
+      id: 'a1',
+      employee: employee.id,
+      date: '2026-10-03',
+      status: 'full',
+      ot_minutes: 0,
+      note: '',
+      created: '',
+      updated: '',
+    }
+    const att2: Attendance = {
+      id: 'a2',
+      employee: employee.id,
+      date: '2026-10-04',
+      status: 'hours',
+      worked_minutes: 180, // 3h = 0.375 d
+      ot_minutes: 0,
+      note: '',
+      created: '',
+      updated: '',
+    }
+    const rows = computeCycleRows(
+      base({
+        attendance: [att1, att2],
+      }),
+    )
+
+    // 1 + 0.375 = 1.375 days worked
+    expect(rows[0].daysWorked).toBe(1.375)
+    expect(rows[0].attendanceCount).toBe(2)
+    // 90,000 + roundHalfUp(90000 * 180 / 480) = 90,000 + 33,750 = 123,750
+    expect(rows[0].earnedPaise).toBe(123750)
+  })
+
+  it('omits chalu upad when chalu_upad_enabled is false', () => {
+    const upad: UpadEntry = {
+      id: 'u1',
+      employee: employee.id,
+      date: '2026-10-04',
+      kind: 'given',
+      category: 'regular',
+      bucket: 'chalu',
+      amount_paise: 50000,
+      note: '',
+      statement: '',
+      created: '',
+    }
+    const rows = computeCycleRows(
+      base({
+        upadEntries: [upad],
+        attendance: [attendance('2026-10-03', 'full')],
+        settings: { chalu_upad_enabled: 'false' },
+      }),
+    )
+
+    expect(rows[0].regularUpadPaise).toBe(0)
+    expect(rows[0].upadOutstandingPaise).toBe(0)
   })
 })
