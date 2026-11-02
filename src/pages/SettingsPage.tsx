@@ -79,6 +79,8 @@ export default function SettingsPage() {
   // Feature 1 & 2 settings
   const [chaluUpadEnabled, setChaluUpadEnabled] = useState(true)
   const [motoUpadEnabled, setMotoUpadEnabled] = useState(true)
+  const [chaluUpadLabel, setChaluUpadLabel] = useState('Chalu Upad')
+  const [motoUpadLabel, setMotoUpadLabel] = useState('Main Upad')
   const [hoursAttendanceEnabled, setHoursAttendanceEnabled] = useState(true)
   const [hourStep, setHourStep] = useState('30')
 
@@ -95,6 +97,8 @@ export default function SettingsPage() {
     setPayoutWeekday(s.expected_payout_weekday ?? DEFAULT_SETTINGS.expected_payout_weekday)
     setChaluUpadEnabled(isChaluUpadEnabled(s))
     setMotoUpadEnabled(isMotoUpadEnabled(s))
+    setChaluUpadLabel(s.chalu_upad_label ?? DEFAULT_SETTINGS.chalu_upad_label)
+    setMotoUpadLabel(s.moto_upad_label ?? DEFAULT_SETTINGS.moto_upad_label)
     setHoursAttendanceEnabled(isHoursAttendanceEnabled(s))
     setHourStep(String(getHourStepMinutes(s)))
   }, [settingsQuery.data])
@@ -107,6 +111,8 @@ export default function SettingsPage() {
       // Service layer safety validation on saving bucket toggles
       await saveSetting('chalu_upad_enabled', String(chaluUpadEnabled))
       await saveSetting('moto_upad_enabled', String(motoUpadEnabled))
+      await saveSetting('chalu_upad_label', chaluUpadLabel.trim() || 'Chalu Upad')
+      await saveSetting('moto_upad_label', motoUpadLabel.trim() || 'Main Upad')
       await saveSetting('hours_attendance_enabled', String(hoursAttendanceEnabled))
       await saveSetting('hour_step_minutes', hourStep)
 
@@ -256,66 +262,96 @@ export default function SettingsPage() {
               </div>
               <div>
                 <div className="text-base font-extrabold text-stone-900">
-                  Advance & Loan Features (Upad System)
+                  Advance & Upad Settings
                 </div>
                 <div className="text-xs text-stone-500">
-                  Control which advance buckets are active. Turning a bucket OFF hides every trace across all screens.
+                  Control which advance buckets are active and customize their display labels.
                 </div>
               </div>
             </div>
 
             <div className="divide-y divide-stone-100">
-              {/* Chalu Upad Toggle */}
-              <div className="flex items-center justify-between py-3">
-                <div className="pr-4">
-                  <div className="text-xs font-bold text-stone-900">
-                    Chalu Upad (ચાલુ ઉપાડ - Weekly Current Advance)
+              {/* Chalu Upad Toggle & Name */}
+              <div className="py-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="pr-4">
+                    <div className="text-xs font-bold text-stone-900">
+                      Chalu Upad (ચાલુ ઉપાડ - Weekly Current Advance)
+                    </div>
+                    <div className="text-[11px] text-stone-500 mt-0.5">
+                      Short-term advance taken during the weekly cycle, settled in the regular payout.
+                    </div>
                   </div>
-                  <div className="text-[11px] text-stone-500 mt-0.5">
-                    Short-term advance taken during the weekly cycle, settled in the regular payout.
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChaluUpadEnabled(!chaluUpadEnabled)}
+                    className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
+                    title={chaluUpadEnabled ? 'Enabled. Click to disable' : 'Disabled. Click to enable'}
+                  >
+                    {chaluUpadEnabled ? (
+                      <ToggleRight className="h-8 w-8 text-emerald-600" />
+                    ) : (
+                      <ToggleLeft className="h-8 w-8 text-stone-300" />
+                    )}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setChaluUpadEnabled(!chaluUpadEnabled)}
-                  className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
-                  title={chaluUpadEnabled ? 'Enabled. Click to disable' : 'Disabled. Click to enable'}
-                >
-                  {chaluUpadEnabled ? (
-                    <ToggleRight className="h-8 w-8 text-emerald-600" />
-                  ) : (
-                    <ToggleLeft className="h-8 w-8 text-stone-300" />
-                  )}
-                </button>
+                {chaluUpadEnabled && (
+                  <div className="pt-1 max-w-xs">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">
+                      Display Label (Custom Name)
+                    </label>
+                    <Input
+                      value={chaluUpadLabel}
+                      onChange={(e) => setChaluUpadLabel(e.target.value)}
+                      placeholder="Chalu Upad"
+                      className="text-xs font-medium"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* Main Upad Toggle */}
-              <div className="flex items-center justify-between py-3">
-                <div className="pr-4">
-                  <div className="text-xs font-bold text-stone-900">
-                    Main Upad (મોટો ઉપાડ - Long-term Loan Account)
+              {/* Main Upad Toggle & Name */}
+              <div className="py-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="pr-4">
+                    <div className="text-xs font-bold text-stone-900">
+                      Main Upad (મોટો ઉપાડ - Long-term Upad Account)
+                    </div>
+                    <div className="text-[11px] text-stone-500 mt-0.5">
+                      Long-term advance tracked across cycles, recovered in fixed deductions.
+                    </div>
                   </div>
-                  <div className="text-[11px] text-stone-500 mt-0.5">
-                    Long-term loan tracked across cycles, recovered in fixed deductions.
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMotoUpadEnabled(!motoUpadEnabled)}
+                    className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
+                    title={motoUpadEnabled ? 'Enabled. Click to disable' : 'Disabled. Click to enable'}
+                  >
+                    {motoUpadEnabled ? (
+                      <ToggleRight className="h-8 w-8 text-emerald-600" />
+                    ) : (
+                      <ToggleLeft className="h-8 w-8 text-stone-300" />
+                    )}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setMotoUpadEnabled(!motoUpadEnabled)}
-                  className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
-                  title={motoUpadEnabled ? 'Enabled. Click to disable' : 'Disabled. Click to enable'}
-                >
-                  {motoUpadEnabled ? (
-                    <ToggleRight className="h-8 w-8 text-emerald-600" />
-                  ) : (
-                    <ToggleLeft className="h-8 w-8 text-stone-300" />
-                  )}
-                </button>
+                {motoUpadEnabled && (
+                  <div className="pt-1 max-w-xs">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">
+                      Display Label (Custom Name)
+                    </label>
+                    <Input
+                      value={motoUpadLabel}
+                      onChange={(e) => setMotoUpadLabel(e.target.value)}
+                      placeholder="Main Upad"
+                      className="text-xs font-medium"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
             <div className="mt-3 rounded-2xl border border-stone-200 bg-stone-50 p-3 text-[11px] leading-relaxed text-stone-600">
-              <strong className="text-stone-800">No-Trace Rule:</strong> When only Main Upad is enabled, the UI simplifies to a single loan without separate Chalu/Main labels. When both are OFF, advance tracking is completely hidden. Turning OFF is only allowed when all worker balances in that bucket are zero.
+              <strong className="text-stone-800">No-Trace Rule:</strong> When only one bucket is enabled, the UI simplifies to a single upad without separate Chalu/Main labels. When both are OFF, advance tracking is completely hidden. Turning OFF is only allowed when all worker balances in that bucket are zero.
             </div>
           </Card>
 

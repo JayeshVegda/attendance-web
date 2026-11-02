@@ -696,7 +696,7 @@ describe("payout service against live pocketbase", () => {
       employeeId: empId,
       date: "2026-09-01",
       kind: "given",
-      bucket: "moto",
+      bucket: "chalu",
       amountPaise: 1000,
       note: "statement immutability test",
     });
