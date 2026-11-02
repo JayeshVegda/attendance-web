@@ -81,14 +81,17 @@ export function Badge({
   tone = 'neutral',
   dot = false,
   className,
+  title,
 }: {
   children: ReactNode
   tone?: 'neutral' | 'green' | 'amber' | 'red' | 'blue' | 'violet' | 'teal'
   dot?: boolean
   className?: string
+  title?: string
 }) {
   return (
     <span
+      title={title}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold tracking-tight select-none',
         tone === 'neutral' && 'bg-stone-100 text-stone-700',
@@ -413,10 +416,10 @@ export function Modal({
           size === 'xl' && 'sm:max-w-5xl',
         )}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-stone-100 px-5 py-3.5 sm:px-6 bg-stone-50/60">
+        <div className="flex items-start justify-between gap-4 border-b border-stone-200/80 px-6 py-4 bg-stone-50/50">
           <div>
-            <h2 className="text-base font-black text-stone-900">{title}</h2>
-            {description && <p className="mt-0.5 text-xs text-stone-500 font-medium">{description}</p>}
+            <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">{title}</h2>
+            {description && <p className="mt-1 text-xs sm:text-sm text-stone-600 font-medium leading-normal">{description}</p>}
           </div>
           <button
             onClick={onClose}

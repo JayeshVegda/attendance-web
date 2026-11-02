@@ -87,7 +87,7 @@ describe('payroll engine', () => {
   it('adds overtime based on the day rate and divisor', () => {
     expect(dayPayPaise('full', 240, 40000, 8)).toBe(60000)
     expect(dayPayPaise('half', 60, 40000, 8)).toBe(25000)
-    expect(dayPayPaise('absent', 240, 40000, 8)).toBe(20000)
+    expect(dayPayPaise('absent', 240, 40000, 8)).toBe(0)
     expect(dayPayPaise('', 240, 40000, 8)).toBe(0)
   })
 

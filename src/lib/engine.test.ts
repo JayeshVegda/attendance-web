@@ -427,4 +427,21 @@ describe("spec worked cases", () => {
     expect(r.result.total_due_paise).toBe(150000); // 100000 + 50000
     expect(r.result.payable_paise).toBe(150000);
   });
+
+  it("case 25 - negative new upad is refused, not accepted as hidden recovery", () => {
+    const r = run(
+      worker({ opening_carry_paise: 400000, opening_date: "2026-10-01" }),
+      "2026-10-02",
+      RATE_500,
+      FULL_PERIOD,
+      [att("2026-10-01", "full")],
+      [],
+      [],
+      {
+        new_chalu_given_paise: -50000,
+      }
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0].code).toBe("new_upad_negative");
+  });
 });

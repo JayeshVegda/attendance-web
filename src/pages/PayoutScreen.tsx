@@ -5,6 +5,8 @@ import {
   EMPTY_INPUTS,
   formatEngineError,
   loadWorkerContexts,
+  newIdempotencyKey,
+  repairPendingRun,
   savePayout,
   type WorkerContext,
 } from '../lib/payout-service'
@@ -78,6 +80,12 @@ export default function PayoutScreen({
   const [inspectingWorkerId, setInspectingWorkerId] = useState<string | null>(null)
   const [notesOpen, setNotesOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [confirmKey, setConfirmKey] = useState<string | null>(null)
+
+  function openConfirm() {
+    setConfirmKey(newIdempotencyKey())
+    setConfirmOpen(true)
+  }
 
   const cutoff = includePayoutDay ? payoutDate : addDays(payoutDate, -1)
 
@@ -333,6 +341,7 @@ export default function PayoutScreen({
         payoutDate,
         cutoff,
         note: '',
+        idempotencyKey: confirmKey ?? newIdempotencyKey(),
         rows: cleanSelectedRows.map((r) => {
           const inp = getRowInput(inputs, r.context.employee.id)
           const ngChaluPaise = parseMoneyInput(inp.ngChalu)
@@ -368,6 +377,18 @@ export default function PayoutScreen({
     },
   })
 
+  const repairMutation = useMutation({
+    mutationFn: (runId: string) => repairPendingRun(runId),
+    onSuccess: (_res, runId) => {
+      void queryClient.invalidateQueries()
+      toast('Interrupted payout cleaned up. You can save the payout again.')
+      setConfirmKey(null)
+      setConfirmOpen(false)
+      void runId
+    },
+    onError: (err) => toast(err instanceof Error ? err.message : 'Repair failed.', 'error'),
+  })
+
   if (contextsQuery.isLoading || attendanceQuery.isLoading) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-20 text-stone-500 font-semibold">
@@ -377,16 +398,68 @@ export default function PayoutScreen({
     )
   }
 
+  if (contextsQuery.isError || attendanceQuery.isError) {
+    const err = contextsQuery.error || attendanceQuery.error
+    return (
+      <div className="mx-auto max-w-md rounded-2xl border border-rose-200 bg-rose-50/80 p-6 text-center my-12">
+        <div className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-600 mb-2 font-black">
+          ⚠
+        </div>
+        <div className="text-sm font-bold text-rose-950">Failed to load payroll records</div>
+        <div className="text-xs text-rose-700 font-mono mt-1 mb-4">
+          {err instanceof Error ? err.message : 'Could not reach server'}
+        </div>
+        <Button
+          size="sm"
+          className="bg-rose-700 hover:bg-rose-800 text-white font-bold"
+          onClick={() => {
+            void contextsQuery.refetch()
+            void attendanceQuery.refetch()
+            void runsQuery.refetch()
+          }}
+        >
+          Retry Loading
+        </Button>
+      </div>
+    )
+  }
+
   const allSelected = includedRows.length > 0 && includedRows.every((r) => selected[r.context.employee.id])
   const inspectingRow = preview.find((r) => r.context.employee.id === inspectingWorkerId)
+  const pendingRuns = (runsQuery.data ?? []).filter((r) => !r.voided && r.status === 'pending')
 
   return (
     <div className="w-full space-y-2 pb-12 select-text">
+      {/* 0. Pending (interrupted) payout banner */}
+      {pendingRuns.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <TriangleAlert className="h-4 w-4 text-amber-700" />
+            <span className="font-black text-amber-900">
+              An earlier payout save was interrupted ({pendingRuns.length > 1 ? `${pendingRuns.length} runs` : formatDateShort(pendingRuns[0].payout_date)}).
+            </span>
+            <span className="text-amber-800">It is excluded from all money until repaired.</span>
+          </div>
+          <div className="flex gap-2">
+            {pendingRuns.map((r) => (
+              <Button
+                key={r.id}
+                size="sm"
+                className="bg-amber-700 hover:bg-amber-800 text-white font-bold"
+                disabled={repairMutation.isPending}
+                onClick={() => repairMutation.mutate(r.id)}
+              >
+                Repair payout
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
       {/* 1. Fast Control & Summary Header Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-stone-200 bg-white px-3 py-2 shadow-2xs">
         {/* Left: Date & Cutoff controls */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="font-black text-stone-900 text-sm">Issue Payout (પગાર)</span>
+          <span className="font-black text-stone-900 text-sm">Issue Payout</span>
           <span className="text-stone-300">|</span>
           <label className="flex items-center gap-1.5 font-bold text-stone-700">
             <span>Date:</span>
@@ -412,7 +485,7 @@ export default function PayoutScreen({
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1">
             <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
-              Cash to Hand Over (રોકડ):
+              Cash to Hand Over:
             </span>
             <span className="text-base font-black text-emerald-950 tabular-nums">
               {formatMoney(totals.cashToHand)}
@@ -467,7 +540,7 @@ export default function PayoutScreen({
           <Button
             size="sm"
             disabled={hasAnyErrors || cleanSelectedRows.length === 0}
-            onClick={() => setConfirmOpen(true)}
+            onClick={() => openConfirm()}
             className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-4 shadow-xs"
           >
             <Wallet className="h-3.5 w-3.5 mr-1" />
@@ -529,30 +602,38 @@ export default function PayoutScreen({
           </div>
 
           {/* Cards Grid / List */}
-          <div className="space-y-2.5">
-            {includedRows.map((r) => {
-              const emp = r.context.employee
-              const c = r.computation
-              const isTicked = !!selected[emp.id]
-              const inp = getRowInput(inputs, emp.id)
-              const isInactive = !emp.active
+          {includedRows.length === 0 ? (
+            <div className="rounded-xl border border-stone-200 bg-white p-8 text-center text-stone-500 shadow-2xs">
+              <p className="font-bold text-stone-800 text-sm">No active workers found for cutoff {formatDateShort(cutoff)}</p>
+              <p className="text-xs text-stone-400 mt-1">
+                There are no unsettled attendance records, unpaid carry, or loans for this date.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {includedRows.map((r) => {
+                const emp = r.context.employee
+                const c = r.computation
+                const isTicked = !!selected[emp.id]
+                const inp = getRowInput(inputs, emp.id)
+                const isInactive = !emp.active
 
-              // Loan history context: last taken & last payment
-              const chaluGiven = r.context.upads
-                .filter((u) => !u.voided && u.bucket === 'chalu' && u.kind === 'given')
-                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+                // Loan history context: last taken & last payment
+                const chaluGiven = r.context.upads
+                  .filter((u) => !u.voided && u.bucket === 'chalu' && u.kind === 'given')
+                  .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.id ?? '').localeCompare(a.id ?? ''))[0]
 
-              const chaluPaid = r.context.upads
-                .filter((u) => !u.voided && u.bucket === 'chalu' && (u.kind === 'recovery' || u.kind === 'returned'))
-                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+                const chaluPaid = r.context.upads
+                  .filter((u) => !u.voided && u.bucket === 'chalu' && (u.kind === 'recovery' || u.kind === 'returned'))
+                  .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.id ?? '').localeCompare(a.id ?? ''))[0]
 
-              const motoGiven = r.context.upads
-                .filter((u) => !u.voided && u.bucket === 'moto' && u.kind === 'given')
-                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+                const motoGiven = r.context.upads
+                  .filter((u) => !u.voided && u.bucket === 'moto' && u.kind === 'given')
+                  .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.id ?? '').localeCompare(a.id ?? ''))[0]
 
-              const motoPaid = r.context.upads
-                .filter((u) => !u.voided && u.bucket === 'moto' && (u.kind === 'recovery' || u.kind === 'returned'))
-                .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))[0]
+                const motoPaid = r.context.upads
+                  .filter((u) => !u.voided && u.bucket === 'moto' && (u.kind === 'recovery' || u.kind === 'returned'))
+                  .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.id ?? '').localeCompare(a.id ?? ''))[0]
 
               const fullCount = c ? c.day_breakdown.filter((d) => d.status === 'full').length : 0
               const halfCount = c ? c.day_breakdown.filter((d) => d.status === 'half').length : 0
@@ -633,9 +714,9 @@ export default function PayoutScreen({
                         )}
                       </button>
 
-                      {/* Daily Attendance Pills: Softer, smaller Notion pill badges with status dot */}
+                      {/* Daily Attendance Pills: Softer, smaller Notion-style pill badges */}
                       {c && c.day_breakdown.length > 0 && (
-                        <div className="flex flex-wrap items-center gap-1 pl-1.5 border-l border-stone-200">
+                        <div className="flex flex-wrap items-center gap-1 pl-2 border-l border-stone-200">
                           {c.day_breakdown.map((d) => {
                             const isFull = d.status === 'full'
                             const isHalf = d.status === 'half'
@@ -656,12 +737,12 @@ export default function PayoutScreen({
                                 type="button"
                                 onClick={() => setInspectingWorkerId(emp.id)}
                                 className={clsx(
-                                  'inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none border transition-all cursor-pointer select-none',
-                                  isFull && !hasOt && 'bg-emerald-50/70 text-emerald-800 border-emerald-200/60 hover:bg-emerald-100/70',
-                                  isFull && hasOt && 'bg-emerald-100/60 text-emerald-900 border-emerald-300/60 hover:bg-emerald-100',
-                                  isHalf && 'bg-amber-50/70 text-amber-800 border-amber-200/60 hover:bg-amber-100/70',
-                                  isAbsent && 'bg-rose-50/70 text-rose-700 border-rose-200/60 hover:bg-rose-100/70',
-                                  !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-400 border-stone-200/60 hover:bg-stone-100',
+                                  'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none border transition-all cursor-pointer select-none shadow-2xs',
+                                  isFull && !hasOt && 'bg-emerald-50/80 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100',
+                                  isFull && hasOt && 'bg-emerald-100/70 text-emerald-900 border-emerald-300/80 hover:bg-emerald-200/70',
+                                  isHalf && 'bg-amber-50/80 text-amber-800 border-amber-200/70 hover:bg-amber-100',
+                                  isAbsent && 'bg-rose-50/80 text-rose-700 border-rose-200/70 hover:bg-rose-100',
+                                  !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-500 border-stone-200/70 hover:bg-stone-100',
                                 )}
                                 title={`${d.date}: ${isFull ? 'Present' : isHalf ? 'Half day' : isAbsent ? 'Absent' : 'Unmarked'}${hasOt ? ` (+${formatHours(d.ot_minutes)} OT)` : ''}`}
                               >
@@ -679,10 +760,10 @@ export default function PayoutScreen({
                                           : 'bg-stone-300',
                                   )}
                                 />
-                                <span className="text-stone-400 font-normal">{dateLabel}</span>
+                                <span className="opacity-75 font-normal">{dateLabel}</span>
                                 <span className="font-bold">{statusLetter}</span>
                                 {hasOt && (
-                                  <span className="font-black text-emerald-700 text-[8.5px] tabular-nums">
+                                  <span className="font-extrabold text-emerald-800 tabular-nums">
                                     {otText}
                                   </span>
                                 )}
@@ -726,23 +807,23 @@ export default function PayoutScreen({
                   </div>
 
                   {/* Card Body: 3 Categorized Blocks */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-2.5 text-xs">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
                     {/* Block 1: Work & Owed (Earnings) */}
-                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-2.5 flex flex-col justify-between space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-stone-600 border-b border-stone-200/80 pb-1">
-                        <span>1. Earnings & Carry (કમાણી)</span>
-                        <span className="font-bold text-stone-700 tabular-nums normal-case text-[11px]">
+                    <div className="rounded-xl border border-stone-200/90 bg-stone-50/70 p-3 flex flex-col justify-between space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-700 border-b border-stone-200/80 pb-1.5">
+                        <span>1. Earnings & Carry</span>
+                        <span className="font-semibold text-stone-600 tabular-nums normal-case text-xs">
                           {c ? `${daysWorked}/${cycleDays}d worked` : '0d'}
                         </span>
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {/* Base Wages & Overtime Card */}
-                        <div className="rounded-lg border border-stone-200/90 bg-white p-2 shadow-2xs">
+                        <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-black text-stone-900">Base Wages</span>
-                              <span className="rounded bg-stone-100 text-stone-600 px-1.5 py-0.2 text-[10px] font-bold tabular-nums">
+                              <span className="text-xs font-bold text-stone-900">Base Wages</span>
+                              <span className="rounded bg-stone-100 text-stone-600 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
                                 {daysWorked}d × ₹{emp.daily_rate_paise / 100}
                               </span>
                             </div>
@@ -751,7 +832,7 @@ export default function PayoutScreen({
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 text-stone-500">
+                          <div className="flex items-center justify-between text-[11px] pt-1 border-t border-stone-100 text-stone-500">
                             <div className="flex items-center gap-1">
                               <span className="text-stone-400 font-medium">Overtime:</span>
                               <span className="font-semibold text-stone-700">
@@ -770,15 +851,24 @@ export default function PayoutScreen({
                               </span>
                             </div>
                           </div>
+
+                          <div className="flex items-center justify-between text-[10px] pt-0.5 text-stone-400">
+                            <span className="font-medium">
+                              Standard: 8h/d · ₹{(emp.daily_rate_paise / 800).toFixed(1)}/h
+                            </span>
+                            <span className="font-semibold text-stone-700 tabular-nums">
+                              Earned: {c ? formatMoney(c.earned_paise) : '₹0'}
+                            </span>
+                          </div>
                         </div>
 
                         {/* Prior Carry & Adjustments Card */}
-                        <div className="rounded-lg border border-stone-200/90 bg-white p-2 shadow-2xs">
+                        <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-black text-stone-900">Prior Carry</span>
-                              <span className="rounded bg-stone-100 text-stone-600 px-1.5 py-0.2 text-[10px] font-bold tabular-nums">
-                                {(c?.carry_paise ?? 0) > 0 ? 'Unpaid bal' : 'Nil'}
+                              <span className="text-xs font-bold text-stone-900">Prior Carry</span>
+                              <span className="rounded bg-stone-100 text-stone-600 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
+                                {(c?.carry_paise ?? 0) > 0 ? 'Unpaid balance' : 'Nil'}
                               </span>
                             </div>
                             <span className="text-xs font-black tabular-nums text-stone-900">
@@ -786,9 +876,9 @@ export default function PayoutScreen({
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 text-stone-500">
+                          <div className="flex items-center justify-between text-[11px] pt-1 border-t border-stone-100 text-stone-500">
                             <div className="flex items-center gap-1">
-                              <span className="text-stone-400 font-medium">Bonus / Jama:</span>
+                              <span className="text-stone-400 font-medium">Bonus / Adjustments:</span>
                               <span
                                 className={clsx(
                                   'font-bold tabular-nums',
@@ -810,11 +900,20 @@ export default function PayoutScreen({
                               </span>
                             </div>
                           </div>
+
+                          <div className="flex items-center justify-between text-[10px] pt-0.5 text-stone-400">
+                            <span className="font-medium">
+                              Cycle net: Wages + Carry + Adj
+                            </span>
+                            <span className="font-semibold text-stone-700 tabular-nums">
+                              Total: {c ? formatMoney(c.total_due_paise) : '₹0'}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="border-t border-stone-200 pt-1 flex justify-between font-extrabold text-stone-900">
-                        <span>Gross Due (કુલ લેણાં):</span>
+                      <div className="border-t border-stone-200/90 pt-1.5 flex justify-between font-bold text-stone-900">
+                        <span className="text-xs font-bold text-stone-800">Gross Due:</span>
                         <span className="tabular-nums text-sm font-black text-stone-900">
                           {c ? formatMoney(c.total_due_paise) : '—'}
                         </span>
@@ -822,15 +921,15 @@ export default function PayoutScreen({
                     </div>
 
                     {/* Block 2: Loan Deductions (Upad) */}
-                    <div className="rounded-xl border border-amber-200/80 bg-gradient-to-b from-amber-50/60 via-amber-50/30 to-amber-50/20 p-2.5 flex flex-col justify-between space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-amber-950 border-b border-amber-200/70 pb-1">
-                        <span>2. Loan Deductions (ઉપાડ કપાત)</span>
+                    <div className="rounded-xl border border-stone-200/90 bg-stone-50/70 p-3 flex flex-col justify-between space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-700 border-b border-stone-200/80 pb-1.5">
+                        <span>2. Loan Deductions</span>
                         <span
                           className={clsx(
-                            'font-bold tabular-nums normal-case text-[11px] px-1.5 py-0.2 rounded',
+                            'font-bold tabular-nums normal-case text-[11px] px-2 py-0.5 rounded-md border',
                             c && c.chalu_after_paise + c.moto_after_paise > 0
-                              ? 'bg-amber-100 text-amber-900'
-                              : 'bg-white/80 text-stone-500 border border-stone-200/60',
+                              ? 'bg-amber-50 text-amber-900 border-amber-200/70'
+                              : 'bg-white text-stone-500 border-stone-200',
                           )}
                           title={`Chalu: ${formatMoney(c ? c.chalu_after_paise : 0)} + Main: ${formatMoney(c ? c.moto_after_paise : 0)}`}
                         >
@@ -838,25 +937,25 @@ export default function PayoutScreen({
                         </span>
                       </div>
 
-                      <div className="space-y-1.5">
+                      <div className="space-y-2">
                         {/* Chalu Loan Card */}
-                        <div className="rounded-lg border border-amber-200/90 bg-white p-2 shadow-2xs">
+                        <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-black text-amber-950">Chalu Upad</span>
-                              <span className="rounded bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.2 text-[10px] font-extrabold tabular-nums">
+                              <span className="text-xs font-bold text-stone-900">Chalu Loan</span>
+                              <span className="rounded bg-amber-50 text-amber-900 border border-amber-200/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
                                 Bal: {c ? formatMoney(c.chalu_balance_paise) : '₹0'}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] text-stone-400 font-medium">Cut:</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
                               <input
                                 type="text"
                                 inputMode="decimal"
                                 placeholder="0"
                                 value={inp.cr}
                                 onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
-                                className="h-6.5 w-18 px-1.5 text-right font-black text-xs rounded border border-amber-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
+                                className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
                               />
                               {c && c.chalu_balance_paise > 0 && (
                                 <button
@@ -865,7 +964,7 @@ export default function PayoutScreen({
                                     const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
                                     setRowField(emp.id, 'cr', (maxVal / 100).toString())
                                   }}
-                                  className="text-[9px] font-bold text-amber-900 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 cursor-pointer"
+                                  className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
                                   title="Deduct maximum possible"
                                 >
                                   Max
@@ -875,11 +974,11 @@ export default function PayoutScreen({
                           </div>
 
                           {/* Last Taken & Last Paid Context */}
-                          <div className="flex flex-wrap items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 gap-1 text-stone-500">
+                          <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
                             <div className="flex items-center gap-1">
                               <span className="text-stone-400">Last taken:</span>
                               <span className="font-semibold text-stone-700">
-                                {chaluGiven
+                                {chaluGiven && chaluGiven.date
                                   ? `${formatMoney(chaluGiven.amount_paise)} (${formatDateShort(chaluGiven.date)})`
                                   : (emp.opening_chalu_paise ?? 0) > 0
                                     ? `${formatMoney(emp.opening_chalu_paise ?? 0)} (Opening)`
@@ -889,7 +988,7 @@ export default function PayoutScreen({
                             <div className="flex items-center gap-1">
                               <span className="text-stone-400">Last paid:</span>
                               <span className="font-semibold text-stone-700">
-                                {chaluPaid
+                                {chaluPaid && chaluPaid.date
                                   ? `${formatMoney(chaluPaid.amount_paise)} (${formatDateShort(chaluPaid.date)})`
                                   : '—'}
                               </span>
@@ -898,23 +997,23 @@ export default function PayoutScreen({
                         </div>
 
                         {/* Main Loan Card */}
-                        <div className="rounded-lg border border-purple-200/90 bg-white p-2 shadow-2xs">
+                        <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
                           <div className="flex items-center justify-between gap-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-black text-purple-950">Main Loan</span>
-                              <span className="rounded bg-purple-50 text-purple-900 border border-purple-200 px-1.5 py-0.2 text-[10px] font-extrabold tabular-nums">
+                              <span className="text-xs font-bold text-stone-900">Main Loan</span>
+                              <span className="rounded bg-purple-50 text-purple-900 border border-purple-200/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
                                 Bal: {c ? formatMoney(c.moto_balance_paise) : '₹0'}
                               </span>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] text-stone-400 font-medium">Cut:</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
                               <input
                                 type="text"
                                 inputMode="decimal"
                                 placeholder="0"
                                 value={inp.mr}
                                 onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
-                                className="h-6.5 w-18 px-1.5 text-right font-black text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                                className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
                               />
                               {c && c.moto_balance_paise > 0 && (
                                 <button
@@ -927,7 +1026,7 @@ export default function PayoutScreen({
                                     )
                                     setRowField(emp.id, 'mr', (maxVal / 100).toString())
                                   }}
-                                  className="text-[9px] font-bold text-purple-900 hover:bg-purple-100 px-1.5 py-0.5 rounded border border-purple-300 bg-purple-50 cursor-pointer"
+                                  className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
                                   title="Deduct maximum possible"
                                 >
                                   Max
@@ -937,11 +1036,11 @@ export default function PayoutScreen({
                           </div>
 
                           {/* Last Taken & Last Paid Context */}
-                          <div className="flex flex-wrap items-center justify-between text-[9.5px] pt-1 mt-1 border-t border-stone-100 gap-1 text-stone-500">
+                          <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
                             <div className="flex items-center gap-1">
                               <span className="text-stone-400">Last taken:</span>
                               <span className="font-semibold text-stone-700">
-                                {motoGiven
+                                {motoGiven && motoGiven.date
                                   ? `${formatMoney(motoGiven.amount_paise)} (${formatDateShort(motoGiven.date)})`
                                   : (emp.opening_moto_paise ?? 0) > 0
                                     ? `${formatMoney(emp.opening_moto_paise ?? 0)} (Opening)`
@@ -951,7 +1050,7 @@ export default function PayoutScreen({
                             <div className="flex items-center gap-1">
                               <span className="text-stone-400">Last paid:</span>
                               <span className="font-semibold text-stone-700">
-                                {motoPaid
+                                {motoPaid && motoPaid.date
                                   ? `${formatMoney(motoPaid.amount_paise)} (${formatDateShort(motoPaid.date)})`
                                   : '—'}
                               </span>
@@ -960,27 +1059,27 @@ export default function PayoutScreen({
                         </div>
                       </div>
 
-                      <div className="border-t border-amber-200/80 pt-1 flex justify-between font-extrabold text-stone-900">
-                        <span>Total Deducted:</span>
-                        <span className="tabular-nums text-amber-900 font-black">
+                      <div className="border-t border-stone-200/90 pt-1.5 flex justify-between font-bold text-stone-900">
+                        <span className="text-xs font-bold text-stone-800">Total Deducted:</span>
+                        <span className="tabular-nums text-xs font-black text-rose-700">
                           -{formatMoney(c ? c.chalu_recovery_paise + c.moto_recovery_paise : 0)}
                         </span>
                       </div>
                     </div>
 
                     {/* Block 3: Cash Handover (Main Hero Focus) */}
-                    <div className="rounded-xl border-2 border-emerald-400 bg-emerald-50/80 p-2.5 flex flex-col justify-between space-y-1.5">
-                      <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-wider text-emerald-950 border-b border-emerald-200 pb-1">
-                        <span>3. Cash Handover (રોકડ ચૂકવણી)</span>
-                        <span className="font-bold text-emerald-800">
+                    <div className="rounded-xl border border-emerald-300/80 bg-emerald-50/50 p-3 flex flex-col justify-between space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-emerald-950 border-b border-emerald-200 pb-1.5">
+                        <span>3. Cash Handover</span>
+                        <span className="font-bold text-emerald-800 text-xs">
                           Net: {c ? formatMoney(c.payable_paise) : '—'}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-2.5">
                         {/* New Chalu Upad */}
-                        <div className="flex flex-col gap-0.5">
-                          <label className="text-[10px] font-bold text-emerald-950">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-bold text-emerald-950">
                             New Chalu Upad:
                           </label>
                           <input
@@ -989,13 +1088,13 @@ export default function PayoutScreen({
                             placeholder="0"
                             value={inp.ngChalu ?? ''}
                             onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
-                            className="h-7 w-full px-2 text-right font-black text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
                           />
                         </div>
 
                         {/* New Main Upad */}
-                        <div className="flex flex-col gap-0.5">
-                          <label className="text-[10px] font-bold text-purple-950">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-bold text-purple-950">
                             New Main Upad:
                           </label>
                           <input
@@ -1004,13 +1103,13 @@ export default function PayoutScreen({
                             placeholder="0"
                             value={inp.ngMoto ?? ''}
                             onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
-                            className="h-7 w-full px-2 text-right font-black text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
                           />
                         </div>
 
                         {/* Adjustment (+/-) */}
-                        <div className="flex flex-col gap-0.5">
-                          <label className="text-[10px] font-bold text-stone-700">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[11px] font-bold text-stone-700">
                             Adjustment (+/-):
                           </label>
                           <input
@@ -1018,20 +1117,20 @@ export default function PayoutScreen({
                             placeholder="+Bonus / -Fine"
                             value={inp.adj ?? ''}
                             onChange={(e) => setRowField(emp.id, 'adj', e.target.value)}
-                            className="h-7 w-full px-2 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none placeholder:text-[9px] placeholder:font-normal"
+                            className="h-7.5 w-full px-2 text-right font-semibold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none placeholder:text-[10px] placeholder:font-normal placeholder:text-stone-400"
                             title="Add bonus (e.g. 500) or deduction (e.g. -200)"
                           />
                         </div>
 
                         {/* Salary Paid */}
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center justify-between text-[10px] font-bold text-emerald-950">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-emerald-950">
                             <span>Salary Paid:</span>
                             {inp.sp !== '' && (
                               <button
                                 type="button"
                                 onClick={() => setRowField(emp.id, 'sp', '')}
-                                className="text-[9px] font-bold text-emerald-800 hover:underline cursor-pointer"
+                                className="text-[10px] font-bold text-emerald-800 hover:underline cursor-pointer"
                                 title="Reset to full payable amount"
                               >
                                 Full
@@ -1044,19 +1143,19 @@ export default function PayoutScreen({
                             placeholder={c ? paiseToInput(c.payable_paise) : '0'}
                             value={inp.sp}
                             onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
-                            className="h-7 w-full px-2 text-right font-black text-xs rounded border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
                             title="Leave blank to pay full payable amount"
                           />
                         </div>
                       </div>
 
                       {/* The Hero Cash in Hand Box */}
-                      <div className="rounded-xl bg-emerald-800 text-white px-3 py-1.5 flex items-center justify-between shadow-xs">
+                      <div className="rounded-xl bg-emerald-800 text-white p-3 flex items-center justify-between shadow-xs">
                         <div>
-                          <div className="text-[9px] uppercase font-bold tracking-wider text-emerald-200">
-                            CASH TO HAND (હાથમાં રોકડ)
+                          <div className="text-[10px] uppercase font-extrabold tracking-wider text-emerald-200">
+                            CASH TO HAND
                           </div>
-                          <div className="text-[9px] text-emerald-100/90 font-medium">
+                          <div className="text-[10px] text-emerald-100/90 font-medium">
                             {r.salaryPaidPaise > 0 && `${formatMoney(r.salaryPaidPaise)} Sal`}
                             {parseMoneyInput(inp.ngChalu) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngChalu))} Chalu`}
                             {parseMoneyInput(inp.ngMoto) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngMoto))} Main`}
@@ -1064,11 +1163,11 @@ export default function PayoutScreen({
                           </div>
                           {c && r.closingCarryPaise > 0 && (
                             <div className="text-[10px] text-amber-200 font-semibold">
-                              Carry out: {formatMoney(r.closingCarryPaise)}
+                              Carry forward: {formatMoney(r.closingCarryPaise)}
                             </div>
                           )}
                         </div>
-                        <div className="text-xl font-black tabular-nums tracking-tight text-white">
+                        <div className="text-2xl font-black tabular-nums tracking-tight text-white">
                           {c ? formatMoney(r.cashToHandOverPaise) : '—'}
                         </div>
                       </div>
@@ -1077,7 +1176,8 @@ export default function PayoutScreen({
                 </div>
               )
             })}
-          </div>
+            </div>
+          )}
         </div>
       ) : (
         /* TABLE VIEW */
@@ -1099,16 +1199,16 @@ export default function PayoutScreen({
                   colSpan={2}
                   className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900"
                 >
-                  Chalu Loan (ચાલુ)
+                  Chalu Loan
                 </th>
                 <th
                   colSpan={2}
                   className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900"
                 >
-                  Moto Loan (મોટો)
+                  Moto Loan
                 </th>
                 <th colSpan={8} className="py-1 px-2.5 text-center bg-emerald-50/50 text-emerald-950">
-                  Settlement & Cash Handover (ચૂકવણી)
+                  Settlement & Cash Handover
                 </th>
               </tr>
 
@@ -1214,7 +1314,14 @@ export default function PayoutScreen({
             </thead>
 
             <tbody className="divide-y divide-stone-100 font-medium">
-              {includedRows.map((r) => {
+              {includedRows.length === 0 ? (
+                <tr>
+                  <td colSpan={15} className="py-8 text-center text-stone-400 text-xs font-semibold">
+                    No active workers found for this payout cutoff ({formatDateShort(cutoff)})
+                  </td>
+                </tr>
+              ) : (
+                includedRows.map((r) => {
                 const emp = r.context.employee
                 const c = r.computation
                 const isTicked = !!selected[emp.id]
@@ -1535,7 +1642,7 @@ export default function PayoutScreen({
                     </td>
                   </tr>
                 )
-              })}
+              }))}
             </tbody>
 
             {/* Sticky Dense Totals Footer */}
@@ -1711,7 +1818,7 @@ function WorkerInspectorDrawer({
               Upad & Loan Balances
             </div>
             <div className="flex justify-between">
-              <span className="text-stone-600">Opening Carry (બાકી):</span>
+              <span className="text-stone-600">Opening Carry:</span>
               <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.carry_paise)}</span>
             </div>
             <div className="flex justify-between">
@@ -1768,7 +1875,7 @@ function ConfirmModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <Card className="w-full max-w-lg p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-black text-stone-900">Confirm Payout (પગાર ચૂકવણી ખાતરી)</h3>
+        <h3 className="text-lg font-black text-stone-900">Confirm Payout</h3>
         <p className="mt-1 text-xs text-stone-600">
           Closing payout date <strong>{formatDateLong(payoutDate)}</strong> (cutoff {formatDateShort(cutoff)}).
         </p>
@@ -1791,7 +1898,7 @@ function ConfirmModal({
         {/* Note Breakdown */}
         <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs">
           <div className="font-bold text-emerald-950 uppercase text-[10px]">
-            Withdrawal Notes Checklist (નોટો)
+            Withdrawal Notes Checklist
           </div>
           <div className="mt-1.5 flex flex-wrap gap-2">
             {denoms.notes
@@ -1804,6 +1911,14 @@ function ConfirmModal({
                   {n.count} × ₹{n.note}
                 </span>
               ))}
+            {denoms.coins > 0 && (
+              <span
+                key="loose"
+                className="rounded bg-amber-50 px-2 py-0.5 font-mono font-bold text-amber-900 border border-amber-200"
+              >
+                ₹{denoms.coins} coins/change
+              </span>
+            )}
           </div>
         </div>
 
@@ -1813,6 +1928,7 @@ function ConfirmModal({
           </Button>
           <Button
             loading={loading}
+            disabled={workersCount === 0}
             onClick={onConfirm}
             className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold"
           >

@@ -48,11 +48,19 @@ export async function listAttendance(start: string, end: string): Promise<Attend
   })
 }
 
+export async function listAttendanceAll(): Promise<Attendance[]> {
+  return pb.collection(COLLECTIONS.attendance).getFullList<Attendance>({ sort: 'date,employee' })
+}
+
 export async function listAdjustments(start: string, end: string): Promise<Adjustment[]> {
   return pb.collection(COLLECTIONS.adjustments).getFullList<Adjustment>({
     filter: `date >= "${dateKey(start)} 00:00:00.000Z" && date <= "${dateKey(end)} 23:59:59.999Z"`,
     sort: 'date',
   })
+}
+
+export async function listAdjustmentsAll(): Promise<Adjustment[]> {
+  return pb.collection(COLLECTIONS.adjustments).getFullList<Adjustment>({ sort: 'date' })
 }
 
 export async function listUpadEntries(throughDate?: string): Promise<UpadEntry[]> {
@@ -65,10 +73,17 @@ export async function listUpadEntries(throughDate?: string): Promise<UpadEntry[]
 }
 
 export async function listStatements(): Promise<Statement[]> {
-  return pb.collection(COLLECTIONS.statements).getFullList<Statement>({
-    filter: 'voided != true',
-    sort: '-payout_date',
-  })
+  const [stmts, runs] = await Promise.all([
+    pb.collection(COLLECTIONS.statements).getFullList<Statement>({
+      filter: 'voided != true',
+      sort: '-payout_date',
+    }),
+    pb.collection(COLLECTIONS.runs).getFullList<{ id: string; status: string }>({
+      filter: 'voided != true',
+    }),
+  ])
+  const pending = new Set(runs.filter((r) => r.status === 'pending').map((r) => r.id))
+  return pending.size > 0 ? stmts.filter((s) => !pending.has(s.payout_run)) : stmts
 }
 
 export async function listRuns(): Promise<PayoutRun[]> {
@@ -316,9 +331,44 @@ export async function createAdjustment(input: {
   return record
 }
 
+export const PAYOUT_EDIT_LOCK_ERROR = 'Issued by a payout. Undo that payout to change this.'
+
 export async function deleteAdjustment(id: string): Promise<void> {
+  const existing = await pb.collection(COLLECTIONS.adjustments).getOne<Adjustment>(id).catch(() => null)
+  if (existing?.payout_id) {
+    throw new Error(PAYOUT_EDIT_LOCK_ERROR)
+  }
   await pb.collection(COLLECTIONS.adjustments).delete(id)
   await audit('adjustment.delete', 'adjustments', id)
+}
+
+export async function updateAdjustment(id: string, data: Partial<Adjustment>): Promise<Adjustment> {
+  const existing = await pb.collection(COLLECTIONS.adjustments).getOne<Adjustment>(id).catch(() => null)
+  if (existing?.payout_id) {
+    throw new Error(PAYOUT_EDIT_LOCK_ERROR)
+  }
+  const record = await pb.collection(COLLECTIONS.adjustments).update<Adjustment>(id, data)
+  await audit('adjustment.update', 'adjustments', id)
+  return record
+}
+
+export async function deleteUpadEntry(id: string): Promise<void> {
+  const existing = await pb.collection(COLLECTIONS.upad).getOne<UpadEntry>(id).catch(() => null)
+  if (existing?.payout_id) {
+    throw new Error(PAYOUT_EDIT_LOCK_ERROR)
+  }
+  await pb.collection(COLLECTIONS.upad).delete(id)
+  await audit('upad.delete', 'upad_entries', id)
+}
+
+export async function updateUpadEntry(id: string, data: Partial<UpadEntry>): Promise<UpadEntry> {
+  const existing = await pb.collection(COLLECTIONS.upad).getOne<UpadEntry>(id).catch(() => null)
+  if (existing?.payout_id) {
+    throw new Error(PAYOUT_EDIT_LOCK_ERROR)
+  }
+  const record = await pb.collection(COLLECTIONS.upad).update<UpadEntry>(id, data)
+  await audit('upad.update', 'upad_entries', id)
+  return record
 }
 
 export async function createUpadEntry(input: {
@@ -364,17 +414,18 @@ export async function createCashReturn(input: {
 }
 
 export async function getPayrollData(start: string, end: string) {
-  const [employees, rates, attendance, adjustments, upadEntries, statements, settings] =
+  const [employees, rates, periods, attendance, adjustments, upadEntries, statements, settings] =
     await Promise.all([
       listEmployees(true),
       listRates(),
-      listAttendance(start, end),
-      listAdjustments(start, end),
+      listPeriods(),
+      listAttendanceAll(),
+      listAdjustmentsAll(),
       listUpadEntries(end),
       listStatements(),
       getSettings(),
     ])
-  return { employees, rates, attendance, adjustments, upadEntries, statements, settings }
+  return { employees, rates, periods, attendance, adjustments, upadEntries, statements, settings }
 }
 
 export function buildCycleRows(data: Awaited<ReturnType<typeof getPayrollData>>, start: string, end: string) {
@@ -384,111 +435,6 @@ export function buildCycleRows(data: Awaited<ReturnType<typeof getPayrollData>>,
     payoutDate: end,
     otDivisor: otDivisor(data.settings),
   })
-}
-
-export async function createPayout(input: {
-  cycleStart: string
-  payoutDate: string
-  rows: CycleRow[]
-  note?: string
-}): Promise<PayoutRun> {
-  const included = input.rows.filter((row) => row.included)
-  const totals = included.reduce(
-    (sum, row) => {
-      sum.due += row.totalDuePaise
-      sum.paid += row.paidPaise
-      sum.recovery += row.upadRecoveryPaise
-      return sum
-    },
-    { due: 0, paid: 0, recovery: 0 },
-  )
-
-  const createdStatementIds: string[] = []
-  const createdPaymentIds: string[] = []
-  const createdUpadIds: string[] = []
-  let run: PayoutRun | undefined
-
-  try {
-    run = await pb.collection(COLLECTIONS.runs).create<PayoutRun>({
-      cycle_start: input.cycleStart,
-      payout_date: input.payoutDate,
-      status: 'closed',
-      note: input.note || '',
-      total_due_paise: totals.due,
-      total_paid_paise: totals.paid,
-      total_upad_recovery_paise: totals.recovery,
-      employee_count: included.length,
-    })
-
-    for (const row of included) {
-      const statement = await pb.collection(COLLECTIONS.statements).create<Statement>({
-        payout_run: run.id,
-        employee: row.employee.id,
-        cycle_start: input.cycleStart,
-        payout_date: input.payoutDate,
-        opening_paise: row.openingPaise,
-        earned_paise: row.earnedPaise,
-        adjustment_paise: row.adjustmentPaise,
-        upad_outstanding_paise: row.upadOutstandingPaise,
-        upad_recovery_paise: row.upadRecoveryPaise,
-        total_due_paise: row.totalDuePaise,
-        paid_paise: row.paidPaise,
-        closing_paise: row.closingPaise,
-        days_worked: row.daysWorked,
-        ot_minutes: row.otMinutes,
-        note: '',
-      })
-      createdStatementIds.push(statement.id)
-
-      if (row.paidPaise > 0) {
-        const payment = await pb.collection(COLLECTIONS.payments).create<SalaryPayment>({
-          employee: row.employee.id,
-          statement: statement.id,
-          paid_on: input.payoutDate,
-          amount_paise: row.paidPaise,
-          note: 'Payout',
-        })
-        createdPaymentIds.push(payment.id)
-      }
-
-      if (row.upadRecoveryPaise > 0) {
-        const regularRecovery = Math.min(row.upadRecoveryPaise, row.regularUpadPaise)
-        const extraRecovery = Math.max(0, row.upadRecoveryPaise - regularRecovery)
-        const recoveryParts: Array<{ category: UpadCategory; amountPaise: number }> = [
-          { category: 'regular', amountPaise: regularRecovery },
-          { category: 'extra', amountPaise: extraRecovery },
-        ]
-        for (const part of recoveryParts) {
-          if (part.amountPaise <= 0) continue
-          const upad = await pb.collection(COLLECTIONS.upad).create<UpadEntry>({
-            employee: row.employee.id,
-            date: input.payoutDate,
-            kind: 'recovery',
-            category: part.category,
-            amount_paise: part.amountPaise,
-            note: 'Recovered in payout',
-            statement: statement.id,
-          })
-          createdUpadIds.push(upad.id)
-        }
-      }
-    }
-
-    await audit(
-      'payout.create',
-      'payout_runs',
-      run.id,
-      `${input.cycleStart} → ${input.payoutDate}; due=${totals.due}; paid=${totals.paid}`,
-    )
-    return run
-  } catch (error) {
-    // Best-effort rollback so a failed payout does not leave half-written statements.
-    for (const id of createdUpadIds) await pb.collection(COLLECTIONS.upad).delete(id).catch(() => {})
-    for (const id of createdPaymentIds) await pb.collection(COLLECTIONS.payments).delete(id).catch(() => {})
-    for (const id of createdStatementIds) await pb.collection(COLLECTIONS.statements).delete(id).catch(() => {})
-    if (run) await pb.collection(COLLECTIONS.runs).delete(run.id).catch(() => {})
-    throw error
-  }
 }
 
 export async function deletePayout(runId: string): Promise<void> {

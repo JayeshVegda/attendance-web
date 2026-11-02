@@ -1,3 +1,4 @@
+import { WorkerCycleModal } from '../components/WorkerCycleModal'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -25,7 +26,6 @@ import {
   buildCycleRows,
   createAdjustment,
   createCashReturn,
-  createPayout,
   createUpadEntry,
   deleteAdjustment,
   deleteAttendance,
@@ -35,6 +35,7 @@ import {
   listRuns,
   saveAttendance,
 } from '../lib/api'
+import { saveCycleRows } from '../lib/payout-service'
 import { cycleStartFor, lastPayoutDate, otDivisor } from '../lib/cycle'
 import {
   addDays,
@@ -438,14 +439,27 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   })
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      createPayout({
-        cycleStart,
+    mutationFn: () => {
+      if (!payrollData) throw new Error('Payroll data not loaded')
+      return saveCycleRows({
+        employees: payrollData.employees,
+        ratesAll: payrollData.rates,
+        periodsAll: payrollData.periods,
+        attendanceAll: payrollData.attendance,
+        adjustmentsAll: payrollData.adjustments,
+        upadAll: payrollData.upadEntries,
+        statements: payrollData.statements,
+        cutoff: payoutDate,
         payoutDate,
-        rows,
         note: note.trim(),
-      }),
-    onSuccess: (run) => {
+        rows: rows.map((row) => ({
+          employeeId: row.employee.id,
+          recoveryPaise: row.upadRecoveryPaise,
+          paidPaise: row.paidPaise,
+        })),
+      })
+    },
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['runs'] })
       queryClient.invalidateQueries({ queryKey: ['statements'] })
       queryClient.invalidateQueries({ queryKey: ['payments'] })
@@ -454,7 +468,7 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
       queryClient.invalidateQueries({ queryKey: ['employee-detail'] })
       toast('Payout saved and cycle closed successfully')
       setPreviewOpen(false)
-      onNavigate(`reports/${run.id}`)
+      onNavigate(`reports/${result.runId}`)
     },
     onError: (error) => toast(error instanceof Error ? error.message : 'Could not close payout', 'error'),
   })
@@ -1637,6 +1651,11 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
           row={rows.find((r) => r.employee.id === workerModalRow.employee.id) ?? workerModalRow}
           cycleStart={cycleStart}
           payoutDate={payoutDate}
+          attendance={payrollData?.attendance?.filter((a) => a.employee === workerModalRow.employee.id) ?? []}
+          upadEntries={payrollData?.upadEntries?.filter((u) => u.employee === workerModalRow.employee.id) ?? []}
+          rates={payrollData?.rates?.filter((r) => r.employee === workerModalRow.employee.id) ?? []}
+          periods={payrollData?.periods?.filter((p) => p.employee === workerModalRow.employee.id) ?? []}
+          statements={payrollData?.statements ?? []}
           adjustments={payrollData?.adjustments?.filter((a) => a.employee === workerModalRow.employee.id) ?? []}
           onUpdateRowInput={(patch) => setRowInput(workerModalRow.employee.id, patch)}
           currentInput={entries[workerModalRow.employee.id] ?? blankInput()}
@@ -1691,554 +1710,6 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
         </Modal>
       )}
     </div>
-  )
-}
-
-function WorkerCycleModal({
-  open,
-  onClose,
-  row,
-  cycleStart,
-  payoutDate,
-  adjustments,
-  onUpdateRowInput,
-  currentInput,
-  onOpenUpad,
-}: {
-  open: boolean
-  onClose: () => void
-  row: CycleRow
-  cycleStart: string
-  payoutDate: string
-  adjustments: Adjustment[]
-  onUpdateRowInput: (patch: Partial<RowInput>) => void
-  currentInput: RowInput
-  onOpenUpad: () => void
-}) {
-  const [recoveryInput, setRecoveryInput] = useState(currentInput.recovery)
-  const [paidInput, setPaidInput] = useState(
-    currentInput.paid === null ? paiseToInput(row.totalDuePaise) : currentInput.paid,
-  )
-  const [giveAdvanceInput, setGiveAdvanceInput] = useState('')
-  const [isSaving, setIsSaving] = useState(false)
-
-  // Adjustment form state
-  const [adjType, setAdjType] = useState<'bonus' | 'fine'>('bonus')
-  const [adjAmount, setAdjAmount] = useState('')
-  const [adjNote, setAdjNote] = useState('')
-  const [adjError, setAdjError] = useState('')
-
-  const queryClient = useQueryClient()
-  const toast = useToast()
-
-  // Sync inputs if prop changes
-  useEffect(() => {
-    setRecoveryInput(currentInput.recovery)
-    setPaidInput(currentInput.paid === null ? paiseToInput(row.totalDuePaise) : currentInput.paid)
-  }, [currentInput, row.totalDuePaise])
-
-  // Dynamic calculations based on live inputs
-  const beforeRecovery = row.openingPaise + row.earnedPaise + row.adjustmentPaise
-  const maxRecoverable = Math.min(row.upadOutstandingPaise, Math.max(0, beforeRecovery))
-  const requestedRec = Math.max(0, parseMoneyInput(recoveryInput))
-  const currentRecoveryPaise = Math.min(requestedRec, maxRecoverable)
-  const liveTotalDuePaise = Math.max(0, beforeRecovery - currentRecoveryPaise)
-
-  const rawPaidPaise = paidInput === '' ? 0 : parseMoneyInput(paidInput)
-  const actualSalaryPaidPaise = Math.min(rawPaidPaise, liveTotalDuePaise)
-  const overpaidPaise = Math.max(0, rawPaidPaise - liveTotalDuePaise)
-  const freshAdvancePaise = Math.max(0, parseMoneyInput(giveAdvanceInput))
-  const totalNewAdvancePaise = overpaidPaise + freshAdvancePaise
-
-  const unpaidSalaryPaise = Math.max(0, liveTotalDuePaise - actualSalaryPaidPaise)
-  const remainingUpadDebtPaise = Math.max(0, row.upadOutstandingPaise - currentRecoveryPaise)
-  const totalCashToHandOver = actualSalaryPaidPaise + totalNewAdvancePaise
-  const isOverAdvanced = row.upadOutstandingPaise > Math.max(0, beforeRecovery)
-
-  const createAdjMutation = useMutation({
-    mutationFn: async () => {
-      const paise = parseMoneyInput(adjAmount)
-      if (paise <= 0) throw new Error('Enter an amount greater than zero.')
-      const finalAmount = adjType === 'bonus' ? paise : -paise
-      return createAdjustment({
-        employeeId: row.employee.id,
-        date: payoutDate,
-        amountPaise: finalAmount,
-        note: adjNote.trim() || (adjType === 'bonus' ? 'Bonus / Allowance' : 'Fine / Deduction'),
-      })
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payroll'] })
-      queryClient.invalidateQueries({ queryKey: ['employee-detail'] })
-      setAdjAmount('')
-      setAdjNote('')
-      setAdjError('')
-      toast('Adjustment added')
-    },
-    onError: (err) => setAdjError(err instanceof Error ? err.message : 'Could not add adjustment'),
-  })
-
-  const deleteAdjMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return deleteAdjustment(id)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payroll'] })
-      queryClient.invalidateQueries({ queryKey: ['employee-detail'] })
-      toast('Adjustment removed')
-    },
-    onError: (err) => toast(err instanceof Error ? err.message : 'Could not delete adjustment', 'error'),
-  })
-
-  async function handleSave() {
-    setIsSaving(true)
-    try {
-      if (totalNewAdvancePaise > 0) {
-        await createUpadEntry({
-          employeeId: row.employee.id,
-          date: payoutDate,
-          kind: 'given',
-          category: 'regular',
-          amountPaise: totalNewAdvancePaise,
-          note:
-            overpaidPaise > 0 && freshAdvancePaise > 0
-              ? `Overpayment (${formatMoney(overpaidPaise)}) + Advance (${formatMoney(freshAdvancePaise)}) on payday`
-              : overpaidPaise > 0
-                ? 'Overpayment cash recorded as advance (carry forward)'
-                : 'Advance given on payday (carry forward)',
-        })
-        queryClient.invalidateQueries({ queryKey: ['upad'] })
-        queryClient.invalidateQueries({ queryKey: ['payroll'] })
-        queryClient.invalidateQueries({ queryKey: ['employee-detail'] })
-        toast(`Recorded ${formatMoney(totalNewAdvancePaise)} advance (carried forward)`)
-      }
-
-      onUpdateRowInput({
-        recovery: recoveryInput,
-        paid: paiseToInput(actualSalaryPaidPaise),
-      })
-      onClose()
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not save payment', 'error')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={row.employee.name}
-      description={`#${row.employee.employee_no} · Daily Rate: ${formatMoney(row.employee.daily_rate_paise)}/d · ${formatDateRange(cycleStart, payoutDate)}`}
-      size="lg"
-      footer={
-        <>
-          <Button
-            variant="ghost"
-            onClick={onOpenUpad}
-            className="mr-auto text-amber-800 hover:bg-amber-50"
-          >
-            <HandCoins className="h-4 w-4" />
-            <span>Manage Upad</span>
-          </Button>
-          <Button variant="secondary" onClick={onClose} disabled={isSaving}>
-            Cancel
-          </Button>
-          <Button variant="emerald" onClick={handleSave} loading={isSaving}>
-            Save Changes
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        {/* Worker Summary Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
-              Days Worked
-            </div>
-            <div className="mt-1 text-base font-bold text-stone-900 tabular-nums">
-              {row.daysWorked} d
-            </div>
-            <div className="text-[10px] font-medium text-stone-500 tabular-nums">
-              {row.otMinutes > 0 ? `+${formatHours(row.otMinutes)} OT` : '0 hr OT'}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-2.5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">
-              Earned Salary
-            </div>
-            <div className="mt-1 text-base font-bold text-stone-900 tabular-nums">
-              {formatMoney(row.earnedPaise, { showZero: true })}
-            </div>
-            <div className="text-[10px] font-medium text-stone-500 tabular-nums">
-              Rate: {formatMoney(row.employee.daily_rate_paise)}/d
-            </div>
-          </div>
-
-          <div
-            className={clsx(
-              'rounded-xl border p-2.5',
-              row.openingPaise > 0
-                ? 'border-sky-300 bg-sky-50/80 text-sky-950'
-                : 'border-stone-200 bg-stone-50 text-stone-900',
-            )}
-          >
-            <div className={clsx(
-              'text-[10px] font-semibold uppercase tracking-wider',
-              row.openingPaise > 0 ? 'text-sky-800' : 'text-stone-500',
-            )}>
-              Opening Baki
-            </div>
-            <div className="mt-1 text-base font-bold tabular-nums">
-              {formatMoney(row.openingPaise, { showZero: true })}
-            </div>
-            <div className={clsx(
-              'text-[10px] font-medium',
-              row.openingPaise > 0 ? 'text-sky-700 font-semibold' : 'text-stone-500',
-            )}>
-              {row.openingPaise > 0 ? 'Carried forward from last cycle' : 'No opening baki'}
-            </div>
-          </div>
-
-          <div
-            className={clsx(
-              'rounded-xl border p-2.5',
-              row.upadOutstandingPaise > 0
-                ? 'border-amber-300 bg-amber-50/80 text-amber-950'
-                : 'border-stone-200 bg-stone-50 text-stone-900',
-            )}
-          >
-            <div className={clsx(
-              'text-[10px] font-semibold uppercase tracking-wider',
-              row.upadOutstandingPaise > 0 ? 'text-amber-800' : 'text-stone-500',
-            )}>
-              Upad Debt
-            </div>
-            <div className="mt-1 text-base font-bold tabular-nums">
-              {formatMoney(row.upadOutstandingPaise, { showZero: true })}
-            </div>
-            <div className={clsx(
-              'text-[10px] font-medium',
-              row.upadOutstandingPaise > 0 ? 'text-amber-700' : 'text-stone-500',
-            )}>
-              Chalu: {formatMoney(row.regularUpadPaise)} · Main: {formatMoney(row.extraUpadPaise)}
-            </div>
-          </div>
-        </div>
-
-        {/* Over-Advanced Alert */}
-        {isOverAdvanced && (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-3.5 text-xs text-amber-900">
-            <div className="font-bold flex items-center gap-1.5 text-amber-950">
-              <AlertCircle className="h-4 w-4 text-amber-700 shrink-0" />
-              <span>Worker is Over-Advanced by {formatMoney(row.upadOutstandingPaise - maxRecoverable)}</span>
-            </div>
-            <div className="mt-1 text-amber-800 leading-relaxed">
-              Worker owes {formatMoney(row.upadOutstandingPaise)} in advances, but only earned {formatMoney(maxRecoverable)} in this cycle.
-              {currentRecoveryPaise > 0 ? (
-                <>
-                  {' '}Deducting {formatMoney(currentRecoveryPaise)} from salary leaves <strong>{formatMoney(row.upadOutstandingPaise - currentRecoveryPaise)} Upad debt</strong>, which will <strong>automatically carry forward</strong> to next week.
-                </>
-              ) : (
-                <>
-                  {' '}The full <strong>{formatMoney(row.upadOutstandingPaise)} Upad debt</strong> will <strong>automatically carry forward</strong> to next week.
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Calculation summary bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/80 px-3.5 py-2.5 text-xs">
-          <div className="flex flex-wrap items-center gap-1.5 font-medium text-stone-600">
-            <span className="font-semibold text-stone-800">Summary:</span>
-            <span>Salary ({formatMoney(row.earnedPaise)})</span>
-            {row.openingPaise > 0 && (
-              <span className="font-bold text-sky-800">+ Last Baki ({formatMoney(row.openingPaise)})</span>
-            )}
-            {row.adjustmentPaise !== 0 && (
-              <span>
-                {row.adjustmentPaise > 0
-                  ? `+ Bonus (${formatMoney(row.adjustmentPaise)})`
-                  : `- Fine (${formatMoney(Math.abs(row.adjustmentPaise))})`}
-              </span>
-            )}
-            {currentRecoveryPaise > 0 && (
-              <span className="font-bold text-rose-700">- Upad Rec. ({formatMoney(currentRecoveryPaise)})</span>
-            )}
-          </div>
-          <div className="text-right">
-            <span className="text-[10px] font-semibold uppercase text-stone-500 block">Total Payable Due</span>
-            <span className="text-base font-bold text-stone-900 tabular-nums">
-              {formatMoney(liveTotalDuePaise)}
-            </span>
-          </div>
-        </div>
-
-        {/* Recovery & Payment Inputs */}
-        <div className="rounded-2xl border border-stone-200 p-3.5 space-y-3.5 bg-white">
-          <div className="text-xs font-bold text-stone-800 uppercase tracking-wide">
-            Settlement & Payment Inputs
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Field
-                label="Recover Upad From Salary (₹)"
-                hint={maxRecoverable > 0 ? `Max recoverable: ${formatMoney(maxRecoverable)}` : 'No upad to recover'}
-              >
-                <Input
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={recoveryInput}
-                  onChange={(e) => setRecoveryInput(e.target.value)}
-                />
-              </Field>
-              <div className="mt-1.5 flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setRecoveryInput(paiseToInput(maxRecoverable))}
-                  disabled={maxRecoverable <= 0}
-                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50"
-                >
-                  Max ({formatMoney(maxRecoverable)})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRecoveryInput('0')}
-                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100"
-                >
-                  Zero
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <Field
-                label="Paid Now Amount (₹)"
-                hint={
-                  unpaidSalaryPaise > 0
-                    ? `${formatMoney(unpaidSalaryPaise)} carries forward as Last Baki`
-                    : overpaidPaise > 0
-                      ? `${formatMoney(overpaidPaise)} extra cash recorded as Upad`
-                      : 'Full payment settles this cycle'
-                }
-              >
-                <Input
-                  inputMode="decimal"
-                  placeholder={paiseToInput(liveTotalDuePaise)}
-                  value={paidInput}
-                  onChange={(e) => setPaidInput(e.target.value)}
-                />
-              </Field>
-              <div className="mt-1.5 flex gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setPaidInput(paiseToInput(liveTotalDuePaise))}
-                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-700 hover:bg-stone-100"
-                >
-                  Pay Full ({formatMoney(liveTotalDuePaise)})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaidInput('0')}
-                  className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-semibold text-stone-500 hover:bg-stone-100"
-                >
-                  Zero (Unpaid)
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Give Fresh Upad on Payday */}
-          <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
-              <span className="text-xs font-bold text-stone-800">
-                + Give Fresh Upad / Advance Today (₹)
-              </span>
-              <span className="text-[11px] text-amber-800 font-semibold">
-                Added to Upad & carries forward to next cycle
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[10rem]">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400">
-                  ₹
-                </span>
-                <Input
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={giveAdvanceInput}
-                  onChange={(e) => setGiveAdvanceInput(e.target.value)}
-                  className="pl-7"
-                />
-              </div>
-              <div className="flex items-center gap-1">
-                {[200, 500, 1000, 2000].map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setGiveAdvanceInput(String(preset))}
-                    className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-stone-700 hover:bg-stone-50 shadow-2xs"
-                  >
-                    +{preset}
-                  </button>
-                ))}
-                {giveAdvanceInput && (
-                  <button
-                    type="button"
-                    onClick={() => setGiveAdvanceInput('')}
-                    className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs font-semibold text-stone-400 hover:text-stone-700"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Live Cash Handed Over & Carry Forward Summary */}
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2 text-xs">
-            <div className="flex justify-between items-center font-bold text-emerald-950">
-              <span>Total Cash Handed to Worker Today:</span>
-              <span className="text-base font-black tabular-nums text-emerald-900">
-                {formatMoney(totalCashToHandOver, { showZero: true })}
-              </span>
-            </div>
-            <div className="border-t border-emerald-200/60 pt-1.5 space-y-1 text-[11px]">
-              <div className="flex justify-between text-emerald-900 font-medium">
-                <span>• Net salary paid out:</span>
-                <span className="tabular-nums font-bold">{formatMoney(actualSalaryPaidPaise, { showZero: true })}</span>
-              </div>
-              {totalNewAdvancePaise > 0 && (
-                <div className="flex justify-between text-amber-900 font-medium">
-                  <span>• Fresh Upad advance handed:</span>
-                  <span className="tabular-nums font-bold">+{formatMoney(totalNewAdvancePaise)} (Carries forward as Upad)</span>
-                </div>
-              )}
-              {unpaidSalaryPaise > 0 && (
-                <div className="flex justify-between text-sky-900 font-semibold">
-                  <span>• Unpaid salary:</span>
-                  <span className="tabular-nums font-bold">+{formatMoney(unpaidSalaryPaise)} (Carries forward as Last Baki)</span>
-                </div>
-              )}
-              {remainingUpadDebtPaise + totalNewAdvancePaise > 0 && (
-                <div className="flex justify-between text-stone-700 font-medium">
-                  <span>• Total Upad remaining for next cycle:</span>
-                  <span className="tabular-nums font-bold text-amber-900">
-                    {formatMoney(remainingUpadDebtPaise + totalNewAdvancePaise)} CF
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Adjustments Section (Bonuses & Fines) */}
-        <div className="rounded-2xl border border-stone-200 p-3.5 space-y-3 bg-white">
-          <div className="flex items-center justify-between">
-            <div className="text-xs font-bold text-stone-800 uppercase tracking-wide">
-              Adjustments (Bonus / Fines)
-            </div>
-            <span className="text-xs font-semibold tabular-nums text-stone-600">
-              Total: {signedMoney(row.adjustmentPaise)}
-            </span>
-          </div>
-
-          {/* Existing Adjustments list */}
-          {adjustments.length > 0 ? (
-            <div className="space-y-1.5 max-h-36 overflow-y-auto">
-              {adjustments.map((adj) => (
-                <div
-                  key={adj.id}
-                  className="flex items-center justify-between rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-1.5 text-xs"
-                >
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={clsx(
-                        'inline-flex items-center justify-center rounded px-1.5 py-0.2 text-[10px] font-bold uppercase',
-                        adj.amount_paise >= 0
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-rose-100 text-rose-800',
-                      )}
-                    >
-                      {adj.amount_paise >= 0 ? '+ Bonus' : '- Fine'}
-                    </span>
-                    <span className="text-stone-700 font-medium">{adj.note || 'Adjustment'}</span>
-                    <span className="text-[10px] text-stone-400">{formatDateShort(adj.date)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={clsx(
-                        'font-bold tabular-nums',
-                        adj.amount_paise >= 0 ? 'text-emerald-700' : 'text-rose-700',
-                      )}
-                    >
-                      {signedMoney(adj.amount_paise)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => deleteAdjMutation.mutate(adj.id)}
-                      disabled={deleteAdjMutation.isPending}
-                      className="rounded p-1 text-stone-400 hover:text-rose-600 hover:bg-rose-50"
-                      title="Remove adjustment"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-stone-400 py-1">
-              No adjustments added for this worker in this cycle.
-            </div>
-          )}
-
-          {/* Add New Adjustment Form */}
-          <div className="border-t border-stone-100 pt-3 space-y-2">
-            <div className="text-[11px] font-semibold text-stone-600">Add New Adjustment:</div>
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-              <Select
-                value={adjType}
-                onChange={(e) => setAdjType(e.target.value as 'bonus' | 'fine')}
-              >
-                <option value="bonus">+ Bonus / Allowance</option>
-                <option value="fine">- Fine / Deduction</option>
-              </Select>
-              <Input
-                inputMode="decimal"
-                placeholder="Amount (₹)"
-                value={adjAmount}
-                onChange={(e) => {
-                  setAdjAmount(e.target.value)
-                  setAdjError('')
-                }}
-              />
-              <Input
-                placeholder="Reason / Note"
-                value={adjNote}
-                onChange={(e) => setAdjNote(e.target.value)}
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => createAdjMutation.mutate()}
-                loading={createAdjMutation.isPending}
-                disabled={!adjAmount}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Add</span>
-              </Button>
-            </div>
-            {adjError && <div className="text-xs text-rose-600 font-medium">{adjError}</div>}
-          </div>
-        </div>
-      </div>
-    </Modal>
   )
 }
 

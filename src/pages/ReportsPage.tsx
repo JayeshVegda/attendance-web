@@ -61,7 +61,8 @@ export default function ReportsPage({
     onSuccess: (res) => {
       void queryClient.invalidateQueries()
       setUndoOpen(false)
-      if (res.ok) toast('Payout undone — statements, payments and upad entries reversed.')
+      if (res.ok) toast('Payout undone - statements, payments and upad entries reversed.')
+      else if (res.reason === 'use_repair') toast('This payout is still pending (an interrupted save). Use Repair Payout on the Save Payout page.', 'error')
       else toast(`Cannot undo: newer payout already exists for ${res.workers.join(', ')}.`, 'error')
     },
     onError: () => {

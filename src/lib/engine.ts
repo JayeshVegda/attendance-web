@@ -9,7 +9,8 @@ export type EngineError =
   | { code: "chalu_recovery_exceeds_balance"; amount: Paise }
   | { code: "moto_recovery_exceeds_balance"; amount: Paise }
   | { code: "recovery_exceeds_due"; amount: Paise }
-  | { code: "salary_paid_out_of_range"; amount: Paise };
+  | { code: "salary_paid_out_of_range"; amount: Paise }
+  | { code: "new_upad_negative"; amount: Paise };
 
 export type EngineWarning =
   | { code: "deduction_exceeds_due"; leftover_paise: Paise }
@@ -50,6 +51,7 @@ export type WorkerRef = {
   opening_chalu_paise: Paise;
   opening_moto_paise: Paise;
   opening_date: string;
+  daily_rate_paise?: Paise;
 };
 
 export type PayoutInputs = {
@@ -61,6 +63,7 @@ export type PayoutInputs = {
   new_chalu_given_paise?: Paise;
   new_moto_given_paise?: Paise;
   payout_adjustment_paise?: Paise;
+  payout_adjustment_note?: string;
 };
 
 export type DayBreakdownRow = {
@@ -256,7 +259,7 @@ export function computePayout(
       d = addDays(d, 1);
       continue;
     }
-    const rate = rateOn(rates, d) ?? 0;
+    const rate = rateOn(rates, d) ?? worker.daily_rate_paise ?? 0;
     const e = dayEarnings(row.status, row.ot_minutes, rate);
     ot += e.ot_paise;
     earned += e.total_paise;
@@ -276,7 +279,7 @@ export function computePayout(
   }
   for (const r of lateRows) {
     if (!r.status || !inAnyPeriod(periods, r.date)) continue;
-    const rate = rateOn(rates, r.date) ?? 0;
+    const rate = rateOn(rates, r.date) ?? worker.daily_rate_paise ?? 0;
     const e = dayEarnings(r.status, r.ot_minutes, rate);
     ot += e.ot_paise;
     earned += e.total_paise;
@@ -337,6 +340,13 @@ export function computePayout(
       amount: Math.max(0, inputs.salary_paid_paise - available),
     });
   }
+
+  const newChalu = inputs.new_chalu_given_paise ?? (inputs.new_upad_bucket === "chalu" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  const newMoto = inputs.new_moto_given_paise ?? (inputs.new_upad_bucket === "moto" ? (inputs.new_upad_given_paise ?? 0) : 0);
+  if (newChalu < 0 || newMoto < 0) {
+    errors.push({ code: "new_upad_negative", amount: Math.min(0, newChalu) + Math.min(0, newMoto) });
+  }
+
   if (errors.length > 0) return { ok: false, errors };
 
   const payable = Math.max(0, totalDue - inputs.salary_paid_paise - totalRecovery);
@@ -347,8 +357,6 @@ export function computePayout(
   const lateCount = breakdown.filter((b) => b.is_late_entry).length;
   if (lateCount > 0) warnings.push({ code: "late_entries", count: lateCount });
 
-  const newChalu = inputs.new_chalu_given_paise ?? (inputs.new_upad_bucket === "chalu" ? (inputs.new_upad_given_paise ?? 0) : 0);
-  const newMoto = inputs.new_moto_given_paise ?? (inputs.new_upad_bucket === "moto" ? (inputs.new_upad_given_paise ?? 0) : 0);
   const totalNewUpad = newChalu + newMoto;
   const chaluAfter = chaluBalance - Math.max(0, inputs.chalu_recovery_paise) + newChalu;
   const motoAfter = motoBalance - Math.max(0, inputs.moto_recovery_paise) + newMoto;

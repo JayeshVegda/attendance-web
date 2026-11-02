@@ -424,7 +424,9 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                         {entry.note || '—'}
                       </td>
                       <td className="px-4 py-3">
-                        {entry.statement ? (
+                        {entry.payout_id ? (
+                          <Badge tone="blue" title="Issued by a payout. Undo that payout to change this.">Payout Issued</Badge>
+                        ) : entry.statement ? (
                           <Badge tone="blue">Payout Settled</Badge>
                         ) : (
                           <span className="text-[11px] font-semibold text-stone-400">Manual</span>

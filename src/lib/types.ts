@@ -60,6 +60,7 @@ export type Adjustment = {
   note: string
   created: string
   settled_payout?: string
+  payout_id?: string
 }
 
 export type UpadKind = 'given' | 'recovery' | 'returned' | 'writeoff'
@@ -76,6 +77,7 @@ export type UpadEntry = {
   note: string
   statement?: string
   payout?: string
+  payout_id?: string
   voided?: boolean
   created: string
 }

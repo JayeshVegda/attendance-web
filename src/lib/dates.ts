@@ -13,19 +13,25 @@ export function dateKey(input: string | Date): string {
   return `${year}-${month}-${day}`
 }
 
-export function parseDate(key: string): Date {
-  const [year, month, day] = key.slice(0, 10).split('-').map(Number)
-  return new Date(year, month - 1, day)
+export function parseDate(key: string | undefined | null): Date {
+  if (!key || typeof key !== 'string') return new Date(NaN)
+  const trimmed = key.trim()
+  if (!trimmed) return new Date(NaN)
+  const parts = trimmed.slice(0, 10).split('-').map(Number)
+  if (parts.length < 3 || parts.some(isNaN)) return new Date(NaN)
+  return new Date(parts[0], parts[1] - 1, parts[2])
 }
 
 export function addDays(key: string, days: number): string {
   const date = parseDate(key)
+  if (isNaN(date.getTime())) return key || ''
   date.setDate(date.getDate() + days)
   return dateKey(date)
 }
 
 export function startOfWeekSaturday(key: string): string {
   const date = parseDate(key)
+  if (isNaN(date.getTime())) return key || ''
   const back = (date.getDay() + 1) % 7
   return addDays(key, -back)
 }
@@ -35,29 +41,40 @@ export function weekDates(startKey: string): string[] {
 }
 
 export function isFriday(key: string): boolean {
-  return parseDate(key).getDay() === 5
+  const date = parseDate(key)
+  return isNaN(date.getTime()) ? false : date.getDay() === 5
 }
 
 export function isSaturday(key: string): boolean {
-  return parseDate(key).getDay() === 6
+  const date = parseDate(key)
+  return isNaN(date.getTime()) ? false : date.getDay() === 6
 }
 
-export function formatDateShort(key: string): string {
+export function formatDateShort(key: string | undefined | null): string {
+  if (!key) return '—'
   const date = parseDate(key)
+  if (isNaN(date.getTime())) return typeof key === 'string' ? key.slice(0, 10) || '—' : '—'
   return `${date.getDate()} ${MONTH_SHORT[date.getMonth()]}`
 }
 
-export function formatDateLong(key: string): string {
+export function formatDateLong(key: string | undefined | null): string {
+  if (!key) return '—'
   const date = parseDate(key)
+  if (isNaN(date.getTime())) return typeof key === 'string' ? key.slice(0, 10) || '—' : '—'
   return `${date.getDate()} ${MONTH_SHORT[date.getMonth()]} ${date.getFullYear()}`
 }
 
 export function formatDateRange(start: string, end: string): string {
-  return `${formatDateShort(start)} – ${formatDateShort(end)} ${parseDate(end).getFullYear()}`
+  const endYear = parseDate(end).getFullYear()
+  const yearStr = isNaN(endYear) ? '' : ` ${endYear}`
+  return `${formatDateShort(start)} – ${formatDateShort(end)}${yearStr}`
 }
 
 export function daysBetweenInclusive(start: string, end: string): number {
-  return Math.round((parseDate(end).getTime() - parseDate(start).getTime()) / DAY_MS) + 1
+  const dStart = parseDate(start).getTime()
+  const dEnd = parseDate(end).getTime()
+  if (isNaN(dStart) || isNaN(dEnd)) return 0
+  return Math.round((dEnd - dStart) / DAY_MS) + 1
 }
 
 export function todayKey(): string {

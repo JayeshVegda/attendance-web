@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppShell, type View } from './components/AppShell'
 import { ToastProvider } from './components/Toast'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import AttendancePage from './pages/AttendancePage'
 import PayoutScreen from './pages/PayoutScreen'
 import EmployeesPage from './pages/EmployeesPage'
@@ -72,7 +73,9 @@ export default function App() {
   return (
     <ToastProvider>
       <AppShell current={route.view} onNavigate={(view) => navigate(view)}>
-        {page}
+        <ErrorBoundary key={route.view}>
+          {page}
+        </ErrorBoundary>
       </AppShell>
     </ToastProvider>
   )
