@@ -21,7 +21,7 @@ import {
   listStatements,
   listUpadEntries,
 } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled, otDivisor } from '../lib/cycle'
+import { otDivisor, useUpadBuckets, type UpadBucketsConfig } from '../lib/cycle'
 import { addDays, formatDateLong, formatDateShort, todayKey } from '../lib/dates'
 import { formatMoney, parseMoneyInput } from '../lib/money'
 import { dayPayPaise, getRateForDate, latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
@@ -58,8 +58,9 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
   const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
-  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
-  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
+  const upadConfig = useUpadBuckets(settingsQuery.data)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
   const today = todayKey()
   const cycleStart = useMemo(() => addDays(today, -30), [today])
   const payrollQuery = useQuery({ queryKey: ['payroll', cycleStart, today], queryFn: () => getPayrollData(cycleStart, today) })
@@ -96,12 +97,18 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
       (sum, employee) => sum + (latestStatements.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
       0,
     )
-    const totalUpadAll = employees.reduce(
-      (sum, employee) => sum + upadBalanceForEmployee(employee, upadQuery.data ?? []),
+    const totalUpadAll = upadConfig.isBothOff ? 0 : employees.reduce(
+      (sum, employee) => {
+        const bd = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
+        return sum + upadConfig.activeBalance(bd.chaluPaise, bd.motoPaise)
+      },
       0,
     )
-    const totalUpadActive = currentlyActive.reduce(
-      (sum, employee) => sum + upadBalanceForEmployee(employee, upadQuery.data ?? []),
+    const totalUpadActive = upadConfig.isBothOff ? 0 : currentlyActive.reduce(
+      (sum, employee) => {
+        const bd = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
+        return sum + upadConfig.activeBalance(bd.chaluPaise, bd.motoPaise)
+      },
       0,
     )
 
@@ -114,7 +121,7 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
       upad: totalUpadAll,
       upadActive: totalUpadActive,
     }
-  }, [employees, latestStatements, upadQuery.data, today])
+  }, [employees, latestStatements, upadQuery.data, today, upadConfig])
 
   const loading = employeesQuery.isLoading || ratesQuery.isLoading
 
@@ -133,7 +140,7 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
       />
 
       {/* KPI Stats */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className={clsx('mb-5 grid grid-cols-2 gap-3', upadConfig.isBothOff ? 'sm:grid-cols-3' : 'sm:grid-cols-4')}>
         <Stat
           label="Active Staff"
           value={totals.active}
@@ -153,13 +160,15 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
           hint={`Active: ${formatMoney(totals.salaryDueActive)} · Inactive: ${formatMoney(totals.salaryDue - totals.salaryDueActive)}`}
           tone="amber"
         />
-        <Stat
-          label="Upad Outstanding"
-          value={formatMoney(totals.upad)}
-          hint={`Active: ${formatMoney(totals.upadActive)} · Inactive: ${formatMoney(totals.upad - totals.upadActive)}`}
-          tone="red"
-          icon={<HandCoins className="h-5 w-5" />}
-        />
+        {upadConfig.hasAny && (
+          <Stat
+            label={upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Outstanding` : 'Upad Outstanding'}
+            value={formatMoney(totals.upad)}
+            hint={`Active: ${formatMoney(totals.upadActive)} · Inactive: ${formatMoney(totals.upad - totals.upadActive)}`}
+            tone="red"
+            icon={<HandCoins className="h-5 w-5" />}
+          />
+        )}
       </div>
 
       {/* Toolbar */}
@@ -234,9 +243,15 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
                 <th className="py-2.5 px-2.5">Status</th>
                 <th className="py-2.5 px-2.5 text-right">Wage Rate</th>
                 <th className="py-2.5 px-2.5 text-right">Unsettled Owed</th>
-                <th className="py-2.5 px-2.5 text-right text-stone-500">Chalu Upad</th>
-                <th className="py-2.5 px-2.5 text-right text-stone-500">Main Upad</th>
-                <th className="py-2.5 px-2.5 text-right">Total Upad</th>
+                {upadConfig.isBothOn ? (
+                  <>
+                    <th className="py-2.5 px-2.5 text-right text-stone-500">{upadConfig.chaluLabel}</th>
+                    <th className="py-2.5 px-2.5 text-right text-stone-500">{upadConfig.motoLabel}</th>
+                    <th className="py-2.5 px-2.5 text-right">Total Upad</th>
+                  </>
+                ) : upadConfig.isOnlyOneOn ? (
+                  <th className="py-2.5 px-2.5 text-right">{upadConfig.singleBucket!.label}</th>
+                ) : null}
                 <th className="py-2.5 px-2.5">Contact</th>
                 <th className="py-2.5 px-3 text-right">Actions</th>
               </tr>
@@ -265,7 +280,7 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
                 const owedNow = carry + earnedCycle + adjustmentCycle
 
                 const upadBreakdown = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
-                const upadTotal = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
+                const upadTotal = upadConfig.activeBalance(upadBreakdown.chaluPaise, upadBreakdown.motoPaise)
 
                 return (
                   <tr
@@ -321,38 +336,46 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
                       )}
                     </td>
 
-                    {/* 5. Chalu Upad */}
-                    <td className="py-2 px-2.5 text-right tabular-nums text-stone-600">
-                      {upadBreakdown.chaluPaise > 0 ? (
-                        <span className="font-semibold text-amber-900">
-                          {formatMoney(upadBreakdown.chaluPaise)}
+                    {/* Upad Columns */}
+                    {upadConfig.isBothOn ? (
+                      <>
+                        <td className="py-2 px-2.5 text-right tabular-nums text-stone-600">
+                          {upadBreakdown.chaluPaise > 0 ? (
+                            <span className="font-semibold text-amber-900">
+                              {formatMoney(upadBreakdown.chaluPaise)}
+                            </span>
+                          ) : (
+                            '0'
+                          )}
+                        </td>
+                        <td className="py-2 px-2.5 text-right tabular-nums text-stone-600">
+                          {upadBreakdown.motoPaise > 0 ? (
+                            <span className="font-semibold text-purple-900">
+                              {formatMoney(upadBreakdown.motoPaise)}
+                            </span>
+                          ) : (
+                            '0'
+                          )}
+                        </td>
+                        <td className="py-2 px-2.5 text-right tabular-nums">
+                          <span
+                            className={`font-black ${upadTotal > 0 ? 'text-rose-700' : 'text-stone-400'}`}
+                          >
+                            {formatMoney(upadTotal, { showZero: true })}
+                          </span>
+                        </td>
+                      </>
+                    ) : upadConfig.isOnlyOneOn ? (
+                      <td className="py-2 px-2.5 text-right tabular-nums">
+                        <span
+                          className={`font-black ${upadTotal > 0 ? 'text-rose-700' : 'text-stone-400'}`}
+                        >
+                          {formatMoney(upadTotal, { showZero: true })}
                         </span>
-                      ) : (
-                        '0'
-                      )}
-                    </td>
+                      </td>
+                    ) : null}
 
-                    {/* 6. Main Upad */}
-                    <td className="py-2 px-2.5 text-right tabular-nums text-stone-600">
-                      {upadBreakdown.motoPaise > 0 ? (
-                        <span className="font-semibold text-purple-900">
-                          {formatMoney(upadBreakdown.motoPaise)}
-                        </span>
-                      ) : (
-                        '0'
-                      )}
-                    </td>
-
-                    {/* 7. Total Upad */}
-                    <td className="py-2 px-2.5 text-right tabular-nums">
-                      <span
-                        className={`font-black ${upadTotal > 0 ? 'text-rose-700' : 'text-stone-400'}`}
-                      >
-                        {formatMoney(upadTotal, { showZero: true })}
-                      </span>
-                    </td>
-
-                    {/* 8. Contact */}
+                    {/* Contact */}
                     <td className="py-2 px-2.5 text-stone-600 whitespace-nowrap">
                       {employee.phone ? (
                         <a
@@ -368,17 +391,19 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
                       )}
                     </td>
 
-                    {/* 9. Actions */}
+                    {/* Actions */}
                     <td className="py-2 px-3 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setUpadTargetId(employee.id)}
-                          className="rounded-lg border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 px-2 py-1 text-xs font-bold text-amber-800 transition"
-                          title="Give upad or record cash return"
-                        >
-                          + Upad
-                        </button>
+                        {upadConfig.hasAny && (
+                          <button
+                            type="button"
+                            onClick={() => setUpadTargetId(employee.id)}
+                            className="rounded-lg border border-stone-200 bg-stone-50 hover:bg-amber-50 hover:border-amber-300 px-2 py-1 text-xs font-bold text-amber-800 transition"
+                            title="Give upad or record cash return"
+                          >
+                            {upadConfig.isOnlyOneOn ? `+ ${upadConfig.singleBucket!.label}` : '+ Upad'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => onNavigate(`payout?worker=${employee.id}`)}
@@ -409,8 +434,7 @@ export default function EmployeesPage({ onNavigate }: { onNavigate: (path: strin
       <AddEmployeeModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        isChaluOn={isChaluOn}
-        isMotoOn={isMotoOn}
+        upadConfig={upadConfig}
         onCreated={(id) => {
           queryClient.invalidateQueries({ queryKey: ['employees'] })
           queryClient.invalidateQueries({ queryKey: ['rates'] })
@@ -437,14 +461,12 @@ function AddEmployeeModal({
   open,
   onClose,
   onCreated,
-  isChaluOn,
-  isMotoOn,
+  upadConfig,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (id: string) => void
-  isChaluOn: boolean
-  isMotoOn: boolean
+  upadConfig: UpadBucketsConfig
 }) {
   const [name, setName] = useState('')
   const [employeeNo, setEmployeeNo] = useState('')
@@ -467,8 +489,8 @@ function AddEmployeeModal({
         ratePaise: parseMoneyInput(rate),
         joinedOn,
         openingSalaryPaise: parseMoneyInput(openingSalary),
-        openingChaluPaise: parseMoneyInput(openingChalu),
-        openingMotoPaise: parseMoneyInput(openingMoto),
+        openingChaluPaise: upadConfig.isChaluOn ? parseMoneyInput(openingChalu) : 0,
+        openingMotoPaise: upadConfig.isMotoOn ? parseMoneyInput(openingMoto) : 0,
         openingDate: joinedOn,
         notes,
       }),
@@ -560,26 +582,41 @@ function AddEmployeeModal({
               placeholder="0"
             />
           </Field>
-          {isChaluOn && (
-            <Field label={isMotoOn ? "Opening Chalu Upad (₹)" : "Opening Upad Balance (₹)"} hint="Current running advance owed.">
+          {upadConfig.isBothOn ? (
+            <>
+              <Field label={`Opening ${upadConfig.chaluLabel} (₹)`} hint="Current running advance owed.">
+                <Input
+                  inputMode="decimal"
+                  value={openingChalu}
+                  onChange={(event) => setOpeningChalu(event.target.value)}
+                  placeholder="0"
+                />
+              </Field>
+              <Field label={`Opening ${upadConfig.motoLabel} (₹)`} hint="Longer-term advance owed.">
+                <Input
+                  inputMode="decimal"
+                  value={openingMoto}
+                  onChange={(event) => setOpeningMoto(event.target.value)}
+                  placeholder="0"
+                />
+              </Field>
+            </>
+          ) : upadConfig.isOnlyOneOn ? (
+            <Field label={`Opening ${upadConfig.singleBucket!.label} (₹)`} hint="Current advance owed.">
               <Input
                 inputMode="decimal"
-                value={openingChalu}
-                onChange={(event) => setOpeningChalu(event.target.value)}
+                value={upadConfig.singleBucket!.id === 'chalu' ? openingChalu : openingMoto}
+                onChange={(event) => {
+                  if (upadConfig.singleBucket!.id === 'chalu') {
+                    setOpeningChalu(event.target.value)
+                  } else {
+                    setOpeningMoto(event.target.value)
+                  }
+                }}
                 placeholder="0"
               />
             </Field>
-          )}
-          {isMotoOn && (
-            <Field label={isChaluOn ? "Opening Main Upad (₹)" : "Opening Loan Balance (₹)"} hint="Long-term loan owed.">
-              <Input
-                inputMode="decimal"
-                value={openingMoto}
-                onChange={(event) => setOpeningMoto(event.target.value)}
-                placeholder="0"
-              />
-            </Field>
-          )}
+          ) : null}
         </div>
 
         <Field label="Internal Notes" hint="Optional notes (role, machine, skills)">

@@ -22,7 +22,8 @@ import {
 } from '../lib/api'
 import { dateKey, formatDateLong, formatDateRange, monthLabel, monthKey } from '../lib/dates'
 import { formatHours, formatMoney } from '../lib/money'
-import { latestStatementByEmployee, upadBalanceForEmployee } from '../lib/payroll'
+import { latestStatementByEmployee, upadBalanceForEmployee, upadBreakdownForEmployee } from '../lib/payroll'
+import { useUpadBuckets } from '../lib/cycle'
 import { useToast } from '../components/Toast'
 import { undoPayout } from '../lib/payout-service'
 import { ConfirmDialog } from '../components/ui'
@@ -53,6 +54,7 @@ export default function ReportsPage({
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const upadConfig = useUpadBuckets(settingsQuery.data)
   const toast = useToast()
   const queryClient = useQueryClient()
 
@@ -117,12 +119,14 @@ export default function ReportsPage({
         (latestBalances.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
       0,
     )
-    const upadDue = employees.reduce(
-      (sum, employee) => sum + upadBalanceForEmployee(employee, upadQuery.data ?? []),
-      0,
-    )
+    const upadDue = upadConfig.isBothOff
+      ? 0
+      : employees.reduce((sum, employee) => {
+          const bd = upadBreakdownForEmployee(employee, upadQuery.data ?? [])
+          return sum + upadConfig.activeBalance(bd.chaluPaise, bd.motoPaise)
+        }, 0)
     return { totalEarned, totalPaid, totalRecovery, salaryDue, upadDue }
-  }, [statements, employees, latestBalances, upadQuery.data])
+  }, [statements, employees, latestBalances, upadQuery.data, upadConfig])
 
   const monthly = useMemo(() => {
     const groups = new Map<
@@ -182,7 +186,7 @@ export default function ReportsPage({
       />
 
       {/* Overview Stat Cards */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+      <div className={clsx('mb-5 grid grid-cols-2 gap-3', upadConfig.isBothOff ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-3 xl:grid-cols-5')}>
         <Stat
           label="Closed Payouts"
           value={runs.length}
@@ -209,12 +213,14 @@ export default function ReportsPage({
           hint="Current unpaid balances"
           tone="amber"
         />
-        <Stat
-          label="Upad Outstanding"
-          value={formatMoney(overview.upadDue)}
-          hint="Total active advances"
-          tone="red"
-        />
+        {upadConfig.hasAny && (
+          <Stat
+            label={upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Outstanding` : 'Upad Outstanding'}
+            value={formatMoney(overview.upadDue)}
+            hint="Total active advances"
+            tone="red"
+          />
+        )}
       </div>
 
       {!runs.length ? (
@@ -291,7 +297,7 @@ export default function ReportsPage({
                         {month.runs} payout{month.runs === 1 ? '' : 's'}
                       </Badge>
                     </div>
-                    <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div className={clsx('mt-2 grid gap-2 text-xs', upadConfig.isBothOff ? 'grid-cols-2' : 'grid-cols-3')}>
                       <div className="rounded-xl bg-stone-50 p-2">
                         <div className="text-[10px] font-bold uppercase text-stone-400">Earned Due</div>
                         <div className="font-extrabold text-stone-800 tabular-nums">
@@ -304,12 +310,16 @@ export default function ReportsPage({
                           {formatMoney(month.paid)}
                         </div>
                       </div>
-                      <div className="rounded-xl bg-amber-50 p-2">
-                        <div className="text-[10px] font-bold uppercase text-amber-700">Upad Rec.</div>
-                        <div className="font-extrabold text-amber-800 tabular-nums">
-                          {formatMoney(month.recovery)}
+                      {upadConfig.hasAny && (
+                        <div className="rounded-xl bg-amber-50 p-2">
+                          <div className="text-[10px] font-bold uppercase text-amber-700">
+                            {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Rec.` : 'Upad Rec.'}
+                          </div>
+                          <div className="font-extrabold text-amber-800 tabular-nums">
+                            {formatMoney(month.recovery)}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -390,14 +400,16 @@ export default function ReportsPage({
                     {formatMoney(selectedRun.total_paid_paise)}
                   </div>
                 </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
-                    Upad Recovered
+                {(upadConfig.hasAny || selectedRun.total_upad_recovery_paise > 0) && (
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                      {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Recovered` : 'Upad Recovered'}
+                    </div>
+                    <div className="mt-1 text-xl font-black text-amber-800 tabular-nums">
+                      {formatMoney(selectedRun.total_upad_recovery_paise)}
+                    </div>
                   </div>
-                  <div className="mt-1 text-xl font-black text-amber-800 tabular-nums">
-                    {formatMoney(selectedRun.total_upad_recovery_paise)}
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Statements Table */}
@@ -410,7 +422,11 @@ export default function ReportsPage({
                       <th className="px-3 py-3 text-right">Opening Baki</th>
                       <th className="px-3 py-3 text-right">Salary Earned</th>
                       <th className="px-3 py-3 text-right">Adjust</th>
-                      <th className="px-3 py-3 text-right">Upad Recovery</th>
+                      {upadConfig.hasAny && (
+                        <th className="px-3 py-3 text-right">
+                          {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Recovery` : 'Upad Recovery'}
+                        </th>
+                      )}
                       <th className="px-3 py-3 text-right">Total Due</th>
                       <th className="px-3 py-3 text-right">Paid Amount</th>
                       <th className="px-4 py-3 text-right">Closing Carry</th>
@@ -447,11 +463,13 @@ export default function ReportsPage({
                           <td className="px-3 py-3 text-right tabular-nums text-xs font-semibold text-stone-600">
                             {formatMoney(statement.adjustment_paise, { showZero: true })}
                           </td>
-                          <td className="px-3 py-3 text-right tabular-nums text-xs font-semibold text-amber-700">
-                            {statement.upad_recovery_paise > 0
-                              ? `-${formatMoney(statement.upad_recovery_paise)}`
-                              : '—'}
-                          </td>
+                          {upadConfig.hasAny && (
+                            <td className="px-3 py-3 text-right tabular-nums text-xs font-semibold text-amber-700">
+                              {statement.upad_recovery_paise > 0
+                                ? `-${formatMoney(statement.upad_recovery_paise)}`
+                                : '—'}
+                            </td>
+                          )}
                           <td className="px-3 py-3 text-right tabular-nums text-xs font-extrabold text-stone-900">
                             {formatMoney(statement.total_due_paise, { showZero: true })}
                           </td>
@@ -499,15 +517,17 @@ export default function ReportsPage({
                           { showZero: true },
                         )}
                       </td>
-                      <td className="px-3 py-3 text-right text-xs tabular-nums text-amber-800">
-                        {formatMoney(
-                          selectedStatements.reduce(
-                            (sum, row) => sum + row.upad_recovery_paise,
-                            0,
-                          ),
-                          { showZero: true },
-                        )}
-                      </td>
+                      {upadConfig.hasAny && (
+                        <td className="px-3 py-3 text-right text-xs tabular-nums text-amber-800">
+                          {formatMoney(
+                            selectedStatements.reduce(
+                              (sum, row) => sum + row.upad_recovery_paise,
+                              0,
+                            ),
+                            { showZero: true },
+                          )}
+                        </td>
+                      )}
                       <td className="px-3 py-3 text-right text-xs tabular-nums text-stone-950">
                         {formatMoney(
                           selectedStatements.reduce((sum, row) => sum + row.total_due_paise, 0),
@@ -549,7 +569,7 @@ export default function ReportsPage({
               </div>
 
               <div className="border-t border-stone-200 px-6 py-3 text-xs text-stone-400 no-print">
-                Calculation: Opening + Earned + Adjustments - Upad Recovery = Total Due. Total Due - Paid = Carried Forward.
+                Calculation: Opening + Earned + Adjustments {upadConfig.hasAny ? '- Upad Recovery ' : ''}= Total Due. Total Due - Paid = Carried Forward.
               </div>
             </Card>
           )}

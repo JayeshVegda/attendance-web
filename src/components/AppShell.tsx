@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { pb } from '../lib/pb'
+import { getSettings } from '../lib/api'
+import { useUpadBuckets } from '../lib/cycle'
 import { getLanguage, setLanguage, t, type LanguageMode, type TranslationKey } from '../lib/i18n'
 
 export type View = 'attendance' | 'payout' | 'employees' | 'upad' | 'reports' | 'settings'
@@ -78,6 +80,10 @@ export function AppShell({
     refetchInterval: 30_000,
     retry: 0,
   })
+
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const upadConfig = useUpadBuckets(settingsQuery.data)
+  const navItems = NAV.filter((item) => (item.id === 'upad' && upadConfig.isBothOff ? false : true))
 
   function handleSwitchLang(next: LanguageMode) {
     setLanguage(next)
@@ -186,7 +192,7 @@ export function AppShell({
             </div>
 
             <nav className="flex-1 space-y-1 px-2 py-3">
-              {NAV.map((item) => {
+              {navItems.map((item) => {
                 const Icon = item.icon
                 const active = current === item.id
                 return (
@@ -331,8 +337,8 @@ export function AppShell({
 
       {/* Mobile bottom nav */}
       <nav className="no-print sticky bottom-0 z-30 border-t border-stone-200 bg-white/95 backdrop-blur-sm lg:hidden">
-        <div className="mx-auto grid max-w-md grid-cols-6">
-          {NAV.map((item) => {
+        <div className={clsx('mx-auto grid max-w-md', upadConfig.isBothOff ? 'grid-cols-5' : 'grid-cols-6')}>
+          {navItems.map((item) => {
             const Icon = item.icon
             const active = current === item.id
             return (

@@ -65,6 +65,7 @@ export type UpadBucketsConfig = {
   chaluBucket?: UpadBucket
   motoBucket?: UpadBucket
   sectionTitle: string     // "Upad Deductions" (Never "Loan")
+  activeBalance: (chaluPaise: number, motoPaise: number) => number
   formatRemainingFooter: (chaluLeftPaise: number, motoLeftPaise: number) => {
     totalPaise: number
     text: string
@@ -134,6 +135,11 @@ export function getUpadBuckets(settings?: SettingsMap): UpadBucketsConfig {
     chaluBucket,
     motoBucket,
     sectionTitle: 'Upad Deductions',
+    activeBalance: (chaluPaise: number, motoPaise: number) => {
+      if (isBothOff) return 0
+      if (isBothOn) return chaluPaise + motoPaise
+      return isChaluOn ? chaluPaise : motoPaise
+    },
     formatRemainingFooter: (chaluLeftPaise: number, motoLeftPaise: number) => {
       if (isBothOff) return null
       if (isBothOn) {

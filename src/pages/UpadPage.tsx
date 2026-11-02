@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { getSettings, listEmployees, listUpadEntries } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { useUpadBuckets } from '../lib/cycle'
 import { SettleModal, type SettleTarget } from '../components/SettleModal'
 import { dateKey, daysBetweenInclusive, formatDateShort, monthKey, todayKey } from '../lib/dates'
 import { formatMoney } from '../lib/money'
@@ -51,9 +51,10 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const upadConfig = useUpadBuckets(settingsQuery.data)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
   const [settleTarget, setSettleTarget] = useState<SettleTarget | null>(null)
-  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
-  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
 
   const employees = employeesQuery.data ?? []
   const entries = upadQuery.data ?? []
@@ -70,9 +71,10 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
           .filter((e) => e.kind === 'given')
           .sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)))[0]
         const openDays = oldestGiven ? Math.max(0, daysBetweenInclusive(oldestGiven.date, today) - 1) : 0
+        const activeBal = upadConfig.activeBalance(breakdown.chaluPaise, breakdown.motoPaise)
         return {
           employee,
-          balance: breakdown.chaluPaise + breakdown.motoPaise,
+          balance: activeBal,
           chalu: breakdown.chaluPaise,
           moto: breakdown.motoPaise,
           lastEntry: sorted[0],
@@ -82,7 +84,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
       })
       .filter((row) => row.balance > 0)
       .sort((a, b) => b.balance - a.balance)
-  }, [employees, entries, today])
+  }, [employees, entries, today, upadConfig])
 
   const runningBalances = useMemo(() => {
     const sortedAsc = [...entries].sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || (a.created ?? '').localeCompare(b.created ?? ''))
@@ -145,6 +147,27 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
   }
 
   const loading = employeesQuery.isLoading || upadQuery.isLoading
+
+  if (upadConfig.isBothOff) {
+    return (
+      <div className="py-12">
+        <Card className="mx-auto max-w-lg p-8 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-500">
+            <Coins className="h-7 w-7 text-stone-400" />
+          </div>
+          <h2 className="mt-4 text-base font-extrabold text-stone-900">Upad is turned off in Settings</h2>
+          <p className="mt-2 text-xs text-stone-500 leading-relaxed">
+            Cash advances and upad deductions are currently turned off. You can re-enable Chalu Upad or Main Upad at any time in Settings.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <Button onClick={() => onNavigate('settings')}>
+              Go to Settings
+            </Button>
+          </div>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -267,7 +290,9 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                         {formatMoney(balance)}
                       </div>
                       <div className="text-[10px] font-bold text-stone-500">
-                        {isChaluOn && isMotoOn ? `Chalu ${formatMoney(chalu)} · Main ${formatMoney(moto)}` : isMotoOn ? `Loan: ${formatMoney(moto)}` : `Upad: ${formatMoney(chalu)}`}
+                        {upadConfig.isBothOn
+                          ? `${upadConfig.chaluLabel} ${formatMoney(chalu)} · ${upadConfig.motoLabel} ${formatMoney(moto)}`
+                          : `${upadConfig.singleBucket?.label || 'Upad'}: ${formatMoney(balance)}`}
                       </div>
                     </div>
                   </div>
@@ -410,7 +435,9 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                             {KIND_LABEL[entry.kind]}
                           </Badge>
                           <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-700">
-                            {isChaluOn && isMotoOn ? (entry.category === 'extra' || entry.category === 'moto' ? 'Main Upad' : 'Chalu Upad') : isMotoOn ? 'Loan' : 'Upad'}
+                            {upadConfig.isBothOn
+                              ? (entry.category === 'extra' || entry.category === 'moto' ? upadConfig.motoLabel : upadConfig.chaluLabel)
+                              : (upadConfig.singleBucket?.label || 'Upad')}
                           </span>
                         </div>
                       </td>

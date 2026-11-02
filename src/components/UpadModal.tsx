@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Coins, HandCoins, Info, Wallet } from 'lucide-react'
 import { createAdjustment, createUpadEntry, getSettings, listUpadEntries } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { useUpadBuckets } from '../lib/cycle'
 import { todayKey } from '../lib/dates'
 import { formatMoney, parseMoneyInput } from '../lib/money'
 import { upadBreakdownForEmployee } from '../lib/payroll'
@@ -41,8 +41,9 @@ export function UpadModal({
 
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries(), enabled: open })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings, enabled: open })
-  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
-  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
+  const upadConfig = useUpadBuckets(settingsQuery.data)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
 
   useEffect(() => {
     if (!open) return
@@ -60,8 +61,9 @@ export function UpadModal({
   const employeeUpad = useMemo(() => {
     if (!employee || !upadQuery.data) return { chalu: 0, moto: 0, total: 0 }
     const bd = upadBreakdownForEmployee(employee, upadQuery.data)
-    return { chalu: bd.chaluPaise, moto: bd.motoPaise, total: bd.chaluPaise + bd.motoPaise }
-  }, [employee, upadQuery.data])
+    const activeTotal = upadConfig.activeBalance(bd.chaluPaise, bd.motoPaise)
+    return { chalu: bd.chaluPaise, moto: bd.motoPaise, total: activeTotal }
+  }, [employee, upadQuery.data, upadConfig])
 
   const inputPaise = useMemo(() => parseMoneyInput(amount), [amount])
 
@@ -247,38 +249,31 @@ export function UpadModal({
               <span className="text-stone-500 font-medium">Rate: {formatMoney(employee.daily_rate_paise)}/d</span>
             </div>
             <div className="mt-1 flex items-center gap-3 text-stone-600">
-              {isChaluOn && isMotoOn ? (
+              {upadConfig.isBothOn ? (
                 <>
                   <span>
-                    Chalu Upad: <strong className="text-amber-800">{formatMoney(employeeUpad.chalu)}</strong>
+                    {upadConfig.chaluLabel}: <strong className="text-amber-800">{formatMoney(employeeUpad.chalu)}</strong>
                   </span>
                   <span>·</span>
                   <span>
-                    Main Upad: <strong className="text-purple-800">{formatMoney(employeeUpad.moto)}</strong>
+                    {upadConfig.motoLabel}: <strong className="text-purple-800">{formatMoney(employeeUpad.moto)}</strong>
                   </span>
                   <span>·</span>
-                </>
-              ) : isMotoOn ? (
-                <>
                   <span>
-                    Main Loan: <strong className="text-purple-800">{formatMoney(employeeUpad.moto)}</strong>
+                    Total Upad:{' '}
+                    <strong className={employeeUpad.total > 0 ? 'text-rose-700' : 'text-stone-700'}>
+                      {formatMoney(employeeUpad.total)}
+                    </strong>
                   </span>
-                  <span>·</span>
                 </>
-              ) : (
-                <>
-                  <span>
-                    Chalu Upad: <strong className="text-amber-800">{formatMoney(employeeUpad.chalu)}</strong>
-                  </span>
-                  <span>·</span>
-                </>
-              )}
-              <span>
-                Total Loan:{' '}
-                <strong className={employeeUpad.total > 0 ? 'text-rose-700' : 'text-stone-700'}>
-                  {formatMoney(employeeUpad.total)}
-                </strong>
-              </span>
+              ) : upadConfig.isOnlyOneOn ? (
+                <span>
+                  {upadConfig.singleBucket!.label}:{' '}
+                  <strong className={employeeUpad.total > 0 ? 'text-rose-700' : 'text-stone-700'}>
+                    {formatMoney(employeeUpad.total)}
+                  </strong>
+                </span>
+              ) : null}
             </div>
           </div>
         )}
@@ -309,14 +304,14 @@ export function UpadModal({
             </Select>
           </Field>
 
-          {!isJama && isChaluOn && isMotoOn && (
-            <Field label="Upad Bucket" hint="Chalu = running daily advance. Main = large loan.">
+          {!isJama && upadConfig.isBothOn && (
+            <Field label="Upad Bucket" hint={`Choose ${upadConfig.chaluLabel} or ${upadConfig.motoLabel}.`}>
               <Select
                 value={category === 'regular' ? 'chalu' : category === 'extra' ? 'moto' : category}
                 onChange={(event) => setCategory(event.target.value as UpadCategory)}
               >
-                <option value="chalu">Chalu Upad (ચાલુ)</option>
-                <option value="moto">Main Upad (મોટો)</option>
+                <option value="chalu">{upadConfig.chaluLabel}</option>
+                <option value="moto">{upadConfig.motoLabel}</option>
               </Select>
             </Field>
           )}
@@ -350,7 +345,7 @@ export function UpadModal({
               type="button"
               onClick={() => setAmount(String(employeeUpad.total / 100))}
               className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-extrabold text-amber-900 hover:bg-amber-100 transition"
-              title="Fill exact full loan amount to clear"
+              title="Fill exact full upad amount to clear"
             >
               Clear All ({formatMoney(employeeUpad.total)})
             </button>
@@ -366,7 +361,7 @@ export function UpadModal({
             </div>
             <div className="leading-relaxed">
               Worker owed <strong>{formatMoney(employeeUpad.total)}</strong>. Paying{' '}
-              <strong>{formatMoney(inputPaise)}</strong> clears his entire loan balance.
+              <strong>{formatMoney(inputPaise)}</strong> clears his entire upad balance.
             </div>
             <div className="rounded-lg bg-white/70 border border-emerald-200 p-2 font-bold text-emerald-900">
               ✨ The remaining <strong>{formatMoney(excessJamaPaise)}</strong> will be credited as{' '}

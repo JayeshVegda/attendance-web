@@ -34,7 +34,7 @@ import {
   setEmployeeActive,
   updateEmployee,
 } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { useUpadBuckets, type UpadBucketsConfig } from '../lib/cycle'
 import {
   addDays,
   formatDateLong,
@@ -103,8 +103,9 @@ export default function EmployeeDetailPage({
   const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
   const ratesQuery = useQuery({ queryKey: ['rates'], queryFn: listRates })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
-  const isChaluOn = isChaluUpadEnabled(settingsQuery.data)
-  const isMotoOn = isMotoUpadEnabled(settingsQuery.data)
+  const upadConfig = useUpadBuckets(settingsQuery.data)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
   const periodsQuery = useQuery({ queryKey: ['periods'], queryFn: listPeriods })
   const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
   const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
@@ -341,7 +342,7 @@ export default function EmployeeDetailPage({
   const owedNow = carry + earnedCycle + adjCycle
 
   const upadBreakdown = upadBreakdownForEmployee(employee, upadEntries, today)
-  const upadBalance = upadBreakdown.chaluPaise + upadBreakdown.motoPaise
+  const upadBalance = upadConfig.activeBalance(upadBreakdown.chaluPaise, upadBreakdown.motoPaise)
   const totalPaid = payments.reduce((sum, payment) => sum + payment.amount_paise, 0)
   const presentDays = attendance.reduce(
     (sum, entry) => sum + (entry.status === 'full' ? 1 : entry.status === 'half' ? 0.5 : 0),
@@ -417,14 +418,16 @@ export default function EmployeeDetailPage({
                 <TrendingUp className="h-4 w-4" />
                 <span>Adjust Rate</span>
               </Button>
-              <Button
-                variant="secondary"
-                className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
-                onClick={() => setUpadOpen(true)}
-              >
-                <Coins className="h-4 w-4" />
-                <span>Give Upad</span>
-              </Button>
+              {upadConfig.hasAny && (
+                <Button
+                  variant="secondary"
+                  className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                  onClick={() => setUpadOpen(true)}
+                >
+                  <Coins className="h-4 w-4" />
+                  <span>Give Upad</span>
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white"
@@ -438,7 +441,7 @@ export default function EmployeeDetailPage({
         </div>
 
         {/* Metrics Grid */}
-        <div className="grid grid-cols-2 gap-4 px-6 py-4 sm:grid-cols-4 bg-stone-50/50">
+        <div className={clsx('grid grid-cols-2 gap-4 px-6 py-4 bg-stone-50/50', upadConfig.isBothOff ? 'sm:grid-cols-3' : 'sm:grid-cols-4')}>
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
               Current Wage Rate
@@ -464,22 +467,26 @@ export default function EmployeeDetailPage({
               Carry: {formatMoney(carry)} · Cycle: {formatMoney(earnedCycle + adjCycle)}
             </div>
           </div>
-          <div>
-            <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-              Upad Outstanding
+          {upadConfig.hasAny && (
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Outstanding` : 'Upad Outstanding'}
+              </div>
+              <div
+                className={clsx(
+                  'mt-1 text-xl font-black tabular-nums',
+                  upadBalance > 0 ? 'text-rose-600' : 'text-stone-900',
+                )}
+              >
+                {formatMoney(upadBalance, { showZero: true })}
+              </div>
+              <div className="text-[10px] font-bold text-stone-500 mt-0.5">
+                {upadConfig.isBothOn
+                  ? `${upadConfig.chaluLabel} ${formatMoney(upadBreakdown.chaluPaise)} · ${upadConfig.motoLabel} ${formatMoney(upadBreakdown.motoPaise)}`
+                  : `${upadConfig.singleBucket?.label || 'Upad'}: ${formatMoney(upadBalance)}`}
+              </div>
             </div>
-            <div
-              className={clsx(
-                'mt-1 text-xl font-black tabular-nums',
-                upadBalance > 0 ? 'text-rose-600' : 'text-stone-900',
-              )}
-            >
-              {formatMoney(upadBalance, { showZero: true })}
-            </div>
-            <div className="text-[10px] font-bold text-stone-500 mt-0.5">
-              {isChaluOn && isMotoOn ? `Chalu ${formatMoney(upadBreakdown.chaluPaise)} · Main ${formatMoney(upadBreakdown.motoPaise)}` : isMotoOn ? `Loan: ${formatMoney(upadBreakdown.motoPaise)}` : `Upad: ${formatMoney(upadBreakdown.chaluPaise)}`}
-            </div>
-          </div>
+          )}
           <div>
             <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
               Total Paid All-Time
@@ -499,7 +506,15 @@ export default function EmployeeDetailPage({
           options={[
             { id: 'salary', label: 'Salary & Statements', icon: <Wallet className="h-3.5 w-3.5" /> },
             { id: 'attendance', label: 'Attendance Log', icon: <CalendarDays className="h-3.5 w-3.5" /> },
-            { id: 'upad', label: 'Upad & Rates', icon: <Coins className="h-3.5 w-3.5" /> },
+            {
+              id: 'upad',
+              label: upadConfig.isBothOff
+                ? 'Wage Rates'
+                : upadConfig.isOnlyOneOn
+                  ? `${upadConfig.singleBucket!.label} & Rates`
+                  : 'Upad & Rates',
+              icon: upadConfig.isBothOff ? <TrendingUp className="h-3.5 w-3.5" /> : <Coins className="h-3.5 w-3.5" />,
+            },
             { id: 'profile', label: 'Profile & Actions', icon: <User className="h-3.5 w-3.5" /> },
           ]}
         />
@@ -867,162 +882,170 @@ export default function EmployeeDetailPage({
       {/* TAB: Upad & Ledger */}
       {tab === 'upad' && (
         <div className="space-y-4">
-          {/* Main Khatavahi Upad Ledger Card */}
-          <Card className="overflow-hidden">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
-              <div>
-                <div className="text-sm font-extrabold text-stone-900 flex items-center gap-2">
-                  <span>Upad & Loan Ledger (ખાતાવહી)</span>
-                  <Badge tone={upadBalance > 0 ? 'amber' : 'green'}>
-                    Total Loan: {formatMoney(upadBalance)}
-                  </Badge>
+          {/* Main Khatavahi Upad Ledger Card (Only when Upad is enabled) */}
+          {upadConfig.hasAny && (
+            <Card className="overflow-hidden">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
+                <div>
+                  <div className="text-sm font-extrabold text-stone-900 flex items-center gap-2">
+                    <span>{upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Ledger (ખાતાવહી)` : 'Upad Ledger (ખાતાવહી)'}</span>
+                    <Badge tone={upadBalance > 0 ? 'amber' : 'green'}>
+                      {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label}: ${formatMoney(upadBalance)}` : `Total Upad: ${formatMoney(upadBalance)}`}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-stone-500">
+                    Full chronological running balance of advances, repayments, and payout recoveries.
+                  </div>
                 </div>
-                <div className="text-xs text-stone-500">
-                  Full chronological running balance of advances, repayments, and payout recoveries.
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setUpadModalKind('returned')
+                      setUpadOpen(true)
+                    }}
+                    className="text-emerald-800 border-emerald-300 bg-emerald-50"
+                  >
+                    <HandCoins className="h-3.5 w-3.5 mr-1" />
+                    <span>+ Cash Return / Jama</span>
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setUpadModalKind('given')
+                      setUpadOpen(true)
+                    }}
+                    className="bg-emerald-700 text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    <span>+ Give Upad</span>
+                  </Button>
                 </div>
               </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setUpadModalKind('returned')
-                    setUpadOpen(true)
-                  }}
-                  className="text-emerald-800 border-emerald-300 bg-emerald-50"
-                >
-                  <HandCoins className="h-3.5 w-3.5 mr-1" />
-                  <span>+ Cash Return / Jama</span>
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setUpadModalKind('given')
-                    setUpadOpen(true)
-                  }}
-                  className="bg-emerald-700 text-white"
-                >
-                  <Plus className="h-3.5 w-3.5 mr-1" />
-                  <span>+ Give Upad</span>
-                </Button>
-              </div>
-            </div>
-
-            {/* Balances & Category Filter Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-stone-50 border-b border-stone-200">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setUpadLedgerCategory('all')}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
-                    upadLedgerCategory === 'all'
-                      ? 'bg-stone-900 text-white'
-                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
-                  }`}
-                >
-                  All Accounts ({formatMoney(upadBalance)})
-                </button>
-                {isChaluOn && (
-                  <button
-                    type="button"
-                    onClick={() => setUpadLedgerCategory('chalu')}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
-                      upadLedgerCategory === 'chalu'
-                        ? 'bg-amber-800 text-white'
-                        : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
-                    }`}
-                  >
-                    {isMotoOn ? 'Chalu Upad' : 'Upad'} ({formatMoney(upadBreakdown.chaluPaise)})
-                  </button>
+              {/* Balances & Category Filter Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-stone-50 border-b border-stone-200">
+                {upadConfig.isBothOn ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setUpadLedgerCategory('all')}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                        upadLedgerCategory === 'all'
+                          ? 'bg-stone-900 text-white'
+                          : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      All Accounts ({formatMoney(upadBalance)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUpadLedgerCategory('chalu')}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                        upadLedgerCategory === 'chalu'
+                          ? 'bg-amber-800 text-white'
+                          : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      {upadConfig.chaluLabel} ({formatMoney(upadBreakdown.chaluPaise)})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUpadLedgerCategory('moto')}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                        upadLedgerCategory === 'moto'
+                          ? 'bg-purple-800 text-white'
+                          : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      {upadConfig.motoLabel} ({formatMoney(upadBreakdown.motoPaise)})
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-lg bg-stone-900 px-2.5 py-1 text-xs font-bold text-white">
+                      {upadConfig.singleBucket?.label || 'Upad'} ({formatMoney(upadBalance)})
+                    </span>
+                  </div>
                 )}
-                {isMotoOn && (
-                  <button
-                    type="button"
-                    onClick={() => setUpadLedgerCategory('moto')}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
-                      upadLedgerCategory === 'moto'
-                        ? 'bg-purple-800 text-white'
-                        : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100'
-                    }`}
-                  >
-                    {isChaluOn ? 'Main Upad' : 'Loan'} ({formatMoney(upadBreakdown.motoPaise)})
-                  </button>
-                )}
+
+                <div className="text-xs font-bold text-stone-600">
+                  {filteredLedger.length} ledger entries recorded
+                </div>
               </div>
 
-              <div className="text-xs font-bold text-stone-600">
-                {filteredLedger.length} ledger entries recorded
-              </div>
-            </div>
-
-            {/* Running Ledger Table */}
-            {filteredLedger.length ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[700px] text-xs">
-                  <thead className="bg-stone-100/80 text-stone-600 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
-                    <tr>
-                      <th className="py-2 px-3 text-left">Date</th>
-                      <th className="py-2 px-2.5 text-left">Account</th>
-                      <th className="py-2 px-3 text-left">Description / Note</th>
-                      <th className="py-2 px-3 text-right text-rose-700">Debit (+ Given)</th>
-                      <th className="py-2 px-3 text-right text-emerald-700">Credit (- Repaid)</th>
-                      <th className="py-2 px-3 text-right font-black text-stone-900 bg-stone-100">
-                        Balance (બાકી)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-stone-100 font-medium">
-                    {filteredLedger.map((row) => (
-                      <tr key={row.id} className="hover:bg-stone-50/80 transition-colors">
-                        <td className="py-2 px-3 whitespace-nowrap text-stone-700 font-bold">
-                          {formatDateShort(row.date)}
-                        </td>
-                        <td className="py-2 px-2.5 whitespace-nowrap">
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
-                              row.category === 'moto'
-                                ? 'bg-purple-50 text-purple-900 border border-purple-200'
-                                : 'bg-amber-50 text-amber-900 border border-amber-200'
-                            }`}
-                          >
-                            {row.category === 'moto' ? 'Main Upad' : 'Chalu Upad'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-stone-800">
-                          {row.description}
-                        </td>
-                        <td className="py-2 px-3 text-right tabular-nums font-bold text-rose-700">
-                          {row.debitPaise > 0 ? `+${formatMoney(row.debitPaise)}` : '—'}
-                        </td>
-                        <td className="py-2 px-3 text-right tabular-nums font-bold text-emerald-700">
-                          {row.creditPaise > 0 ? `−${formatMoney(row.creditPaise)}` : '—'}
-                        </td>
-                        <td className="py-2 px-3 text-right tabular-nums font-black text-stone-950 bg-stone-50/50">
-                          {formatMoney(
-                            upadLedgerCategory === 'chalu'
-                              ? row.chaluBalPaise
-                              : upadLedgerCategory === 'moto'
-                                ? row.motoBalPaise
-                                : row.totalBalPaise,
-                          )}
-                        </td>
+              {/* Running Ledger Table */}
+              {filteredLedger.length ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[700px] text-xs">
+                    <thead className="bg-stone-100/80 text-stone-600 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
+                      <tr>
+                        <th className="py-2 px-3 text-left">Date</th>
+                        <th className="py-2 px-2.5 text-left">Account</th>
+                        <th className="py-2 px-3 text-left">Description / Note</th>
+                        <th className="py-2 px-3 text-right text-rose-700">Debit (+ Given)</th>
+                        <th className="py-2 px-3 text-right text-emerald-700">Credit (- Repaid)</th>
+                        <th className="py-2 px-3 text-right font-black text-stone-900 bg-stone-100">
+                          Balance (બાકી)
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="p-8">
-                <EmptyState
-                  icon={<Coins className="h-7 w-7 text-stone-400" />}
-                  title="No Upad Entries"
-                  description="Advances and repayments will appear here with running balance."
-                />
-              </div>
-            )}
-          </Card>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 font-medium">
+                      {filteredLedger.map((row) => (
+                        <tr key={row.id} className="hover:bg-stone-50/80 transition-colors">
+                          <td className="py-2 px-3 whitespace-nowrap text-stone-700 font-bold">
+                            {formatDateShort(row.date)}
+                          </td>
+                          <td className="py-2 px-2.5 whitespace-nowrap">
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
+                                row.category === 'moto'
+                                  ? 'bg-purple-50 text-purple-900 border border-purple-200'
+                                  : 'bg-amber-50 text-amber-900 border border-amber-200'
+                              }`}
+                            >
+                              {upadConfig.isBothOn
+                                ? (row.category === 'moto' ? upadConfig.motoLabel : upadConfig.chaluLabel)
+                                : (upadConfig.singleBucket?.label || 'Upad')}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-stone-800">
+                            {row.description}
+                          </td>
+                          <td className="py-2 px-3 text-right tabular-nums font-bold text-rose-700">
+                            {row.debitPaise > 0 ? `+${formatMoney(row.debitPaise)}` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right tabular-nums font-bold text-emerald-700">
+                            {row.creditPaise > 0 ? `−${formatMoney(row.creditPaise)}` : '—'}
+                          </td>
+                          <td className="py-2 px-3 text-right tabular-nums font-black text-stone-950 bg-stone-50/50">
+                            {formatMoney(
+                              upadLedgerCategory === 'chalu'
+                                ? row.chaluBalPaise
+                                : upadLedgerCategory === 'moto'
+                                  ? row.motoBalPaise
+                                  : row.totalBalPaise,
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="p-8">
+                  <EmptyState
+                    icon={<Coins className="h-7 w-7 text-stone-400" />}
+                    title="No Upad Entries"
+                    description="Advances and repayments will appear here with running balance."
+                  />
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Wage Rate History Card */}
           <Card className="overflow-hidden">
@@ -1139,6 +1162,7 @@ export default function EmployeeDetailPage({
         key={`edit-${employee.updated}`}
         open={editOpen}
         employee={employee}
+        upadConfig={upadConfig}
         onClose={() => setEditOpen(false)}
         onSaved={() => {
           queryClient.invalidateQueries({ queryKey: ['employees'] })
@@ -1191,11 +1215,13 @@ export default function EmployeeDetailPage({
 function EditEmployeeModal({
   open,
   employee,
+  upadConfig,
   onClose,
   onSaved,
 }: {
   open: boolean
   employee: Employee
+  upadConfig: UpadBucketsConfig
   onClose: () => void
   onSaved: () => void
 }) {
@@ -1214,7 +1240,7 @@ function EditEmployeeModal({
         employee_no: employeeNo.trim(),
         phone: phone.trim(),
         opening_salary_paise: parseMoneyInput(openingSalary),
-        opening_upad_paise: parseMoneyInput(openingUpad),
+        opening_upad_paise: upadConfig.isBothOff ? 0 : parseMoneyInput(openingUpad),
         notes,
       }),
     onSuccess: () => {
@@ -1261,16 +1287,18 @@ function EditEmployeeModal({
             onChange={(event) => setOpeningSalary(event.target.value)}
           />
         </Field>
-        <Field
-          label="Opening Upad Balance (₹)"
-          hint="Only applies before any upad entries exist."
-        >
-          <Input
-            inputMode="decimal"
-            value={openingUpad}
-            onChange={(event) => setOpeningUpad(event.target.value)}
-          />
-        </Field>
+        {upadConfig.hasAny && (
+          <Field
+            label={upadConfig.isOnlyOneOn ? `Opening ${upadConfig.singleBucket!.label} (₹)` : 'Opening Upad Balance (₹)'}
+            hint="Only applies before any upad entries exist."
+          >
+            <Input
+              inputMode="decimal"
+              value={openingUpad}
+              onChange={(event) => setOpeningUpad(event.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Internal Notes" className="sm:col-span-2">
           <Textarea
             rows={3}
