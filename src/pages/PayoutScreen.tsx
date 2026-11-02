@@ -35,7 +35,7 @@ import {
   X,
 } from 'lucide-react'
 import { getSettings, listRuns } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { isChaluUpadEnabled, isMotoUpadEnabled, useUpadBuckets } from '../lib/cycle'
 import { pb } from '../lib/pb'
 import type { Attendance } from '../lib/types'
 
@@ -63,6 +63,7 @@ function getRowInput(inputs: Record<string, RowInputState>, empId: string): RowI
 }
 
 const STATUS_LETTER: Record<string, string> = { full: 'P', half: 'H', absent: 'A' }
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export default function PayoutScreen({
   onNavigate,
@@ -98,9 +99,10 @@ export default function PayoutScreen({
   const runsQuery = useQuery({ queryKey: ['runs'], queryFn: listRuns })
   const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const settings = settingsQuery.data
-  const isChaluOn = isChaluUpadEnabled(settings)
-  const isMotoOn = isMotoUpadEnabled(settings)
-  const hasAnyUpad = isChaluOn || isMotoOn
+  const upadConfig = useUpadBuckets(settings)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
+  const hasAnyUpad = upadConfig.hasAny
 
   // Calculate live preview directly using pure calculation engine
   const preview = useMemo(() => {
@@ -614,7 +616,7 @@ export default function PayoutScreen({
             <div className="rounded-xl border border-stone-200 bg-white p-8 text-center text-stone-500 shadow-2xs">
               <p className="font-bold text-stone-800 text-sm">No active workers found for cutoff {formatDateShort(cutoff)}</p>
               <p className="text-xs text-stone-400 mt-1">
-                There are no unsettled attendance records, unpaid carry, or loans for this date.
+                There are no unsettled attendance records, unpaid carry, or upad for this date.
               </p>
             </div>
           ) : (
@@ -626,7 +628,7 @@ export default function PayoutScreen({
                 const inp = getRowInput(inputs, emp.id)
                 const isInactive = !emp.active
 
-                // Loan history context: last taken & last payment
+                // Upad history context: last taken & last payment
                 const chaluGiven = r.context.upads
                   .filter((u) => !u.voided && u.bucket === 'chalu' && u.kind === 'given')
                   .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || (b.id ?? '').localeCompare(a.id ?? ''))[0]
@@ -652,8 +654,8 @@ export default function PayoutScreen({
 
               const handleQuickSettle = () => {
                 if (!c) return
-                const crVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                const mrVal = Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal))
+                const crVal = upadConfig.isChaluOn ? Math.min(c.chalu_balance_paise, c.total_due_paise) : 0
+                const mrVal = upadConfig.isMotoOn ? Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal)) : 0
                 const netAfter = Math.max(0, c.total_due_paise - crVal - mrVal)
                 setInputs((prev) => ({
                   ...prev,
@@ -722,60 +724,64 @@ export default function PayoutScreen({
                         )}
                       </button>
 
-                      {/* Daily Attendance Pills: Softer, smaller Notion-style pill badges */}
+                      {/* Daily Attendance Pills: Denser, compact badges */}
                       {c && c.day_breakdown.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1 pl-2 border-l border-stone-200">
-                          {c.day_breakdown.map((d) => {
+                          {c.day_breakdown.map((d, i) => {
+                            const curMonth = parseInt(d.date.slice(5, 7), 10) - 1
+                            const prevMonth = i > 0 ? parseInt(c.day_breakdown[i - 1].date.slice(5, 7), 10) - 1 : -1
+                            const showMonth = i === 0 || curMonth !== prevMonth
+                            const monthLabel = MONTH_NAMES[curMonth] ?? ''
+
+                            const isHours = d.status === 'hours'
                             const isFull = d.status === 'full'
                             const isHalf = d.status === 'half'
                             const isAbsent = d.status === 'absent'
                             const hasOt = d.ot_minutes > 0
-                            const statusLetter = isFull ? 'P' : isHalf ? 'H' : isAbsent ? 'A' : '—'
-                            const parts = d.date.slice(0, 10).split('-')
-                            const dateLabel =
-                              parts.length === 3
-                                ? `${parseInt(parts[2], 10)}/${parseInt(parts[1], 10)}`
-                                : d.date
+                            const dayNum = parseInt(d.date.slice(8, 10), 10)
+
+                            let statusStr = '—'
+                            if (isHours) {
+                              const hrs = d.worked_minutes ? (d.worked_minutes % 60 === 0 ? `${d.worked_minutes / 60}` : (d.worked_minutes / 60).toFixed(1)) : '0'
+                              statusStr = `${hrs}h`
+                            } else if (isFull) {
+                              statusStr = 'P'
+                            } else if (isHalf) {
+                              statusStr = 'H'
+                            } else if (isAbsent) {
+                              statusStr = 'A'
+                            }
+
                             const otText = hasOt
-                              ? `+${d.ot_minutes % 60 === 0 ? `${d.ot_minutes / 60}` : formatHours(d.ot_minutes)}`
+                              ? `+${d.ot_minutes % 60 === 0 ? `${d.ot_minutes / 60}h` : formatHours(d.ot_minutes)}`
                               : ''
+
                             return (
-                              <button
-                                key={d.date}
-                                type="button"
-                                onClick={() => setInspectingWorkerId(emp.id)}
-                                className={clsx(
-                                  'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium leading-none border transition-all cursor-pointer select-none shadow-2xs',
-                                  isFull && !hasOt && 'bg-emerald-50/80 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100',
-                                  isFull && hasOt && 'bg-emerald-100/70 text-emerald-900 border-emerald-300/80 hover:bg-emerald-200/70',
-                                  isHalf && 'bg-amber-50/80 text-amber-800 border-amber-200/70 hover:bg-amber-100',
-                                  isAbsent && 'bg-rose-50/80 text-rose-700 border-rose-200/70 hover:bg-rose-100',
-                                  !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-500 border-stone-200/70 hover:bg-stone-100',
-                                )}
-                                title={`${d.date}: ${isFull ? 'Present' : isHalf ? 'Half day' : isAbsent ? 'Absent' : 'Unmarked'}${hasOt ? ` (+${formatHours(d.ot_minutes)} OT)` : ''}`}
-                              >
-                                <span
-                                  className={clsx(
-                                    'w-1.5 h-1.5 rounded-full shrink-0',
-                                    isFull
-                                      ? hasOt
-                                        ? 'bg-emerald-600'
-                                        : 'bg-emerald-500'
-                                      : isHalf
-                                        ? 'bg-amber-500'
-                                        : isAbsent
-                                          ? 'bg-rose-400'
-                                          : 'bg-stone-300',
-                                  )}
-                                />
-                                <span className="opacity-75 font-normal">{dateLabel}</span>
-                                <span className="font-bold">{statusLetter}</span>
-                                {hasOt && (
-                                  <span className="font-extrabold text-emerald-800 tabular-nums">
-                                    {otText}
+                              <div key={d.date} className="inline-flex items-center gap-1">
+                                {showMonth && (
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400 select-none px-0.5">
+                                    {monthLabel}
                                   </span>
                                 )}
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setInspectingWorkerId(emp.id)}
+                                  className={clsx(
+                                    'inline-flex items-center gap-1 h-[22px] px-1.5 py-0.5 text-[11px] font-medium leading-none rounded-[6px] border transition-all cursor-pointer select-none shadow-2xs whitespace-nowrap',
+                                    isHours && 'bg-sky-50 text-sky-800 border-sky-200/70 hover:bg-sky-100',
+                                    isFull && !hasOt && 'bg-emerald-50 text-emerald-800 border-emerald-200/70 hover:bg-emerald-100',
+                                    isFull && hasOt && 'bg-emerald-100 text-emerald-900 border-emerald-300 hover:bg-emerald-200',
+                                    isHalf && 'bg-amber-50 text-amber-800 border-amber-200/70 hover:bg-amber-100',
+                                    isAbsent && 'bg-rose-50 text-rose-700 border-rose-200/70 hover:bg-rose-100',
+                                    !isHours && !isFull && !isHalf && !isAbsent && 'bg-stone-50 text-stone-500 border-stone-200/70 hover:bg-stone-100',
+                                  )}
+                                  title={`${d.date}: ${isHours ? `${statusStr} worked` : isFull ? 'Present' : isHalf ? 'Half day' : isAbsent ? 'Absent' : 'Unmarked'}${hasOt ? ` (${otText} OT)` : ''}`}
+                                >
+                                  <span className="opacity-75">{dayNum}</span>
+                                  <span className="font-bold">{statusStr}</span>
+                                  {hasOt && <span className="font-bold tabular-nums text-emerald-800">{otText}</span>}
+                                </button>
+                              </div>
                             )
                           })}
                         </div>
@@ -801,12 +807,12 @@ export default function PayoutScreen({
                         <span className="text-xs font-bold text-emerald-700">✓ Ready</span>
                       )}
 
-                      {isInactive && c && (c.chalu_balance_paise > 0 || c.moto_balance_paise > 0) && (
+                      {isInactive && c && ((upadConfig.isChaluOn && c.chalu_balance_paise > 0) || (upadConfig.isMotoOn && c.moto_balance_paise > 0)) && (
                         <button
                           type="button"
                           onClick={handleQuickSettle}
                           className="rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2 py-0.5 text-xs font-bold text-amber-900"
-                          title="Offset loan balance against carry and settle"
+                          title="Offset upad balance against carry and settle"
                         >
                           Settle Inactive
                         </button>
@@ -815,7 +821,7 @@ export default function PayoutScreen({
                   </div>
 
                   {/* Card Body: 3 Categorized Blocks */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 text-xs">
+                  <div className={clsx('grid grid-cols-1 gap-3 text-xs', upadConfig.isBothOff ? 'lg:grid-cols-2' : 'lg:grid-cols-3')}>
                     {/* Block 1: Work & Owed (Earnings) */}
                     <div className="rounded-xl border border-stone-200/90 bg-stone-50/70 p-3 flex flex-col justify-between space-y-2">
                       <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-700 border-b border-stone-200/80 pb-1.5">
@@ -928,156 +934,264 @@ export default function PayoutScreen({
                       </div>
                     </div>
 
-                    {/* Block 2: Loan Deductions (Upad) */}
-                    <div className="rounded-xl border border-stone-200/90 bg-stone-50/70 p-3 flex flex-col justify-between space-y-2">
-                      <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-700 border-b border-stone-200/80 pb-1.5">
-                        <span>2. Loan Deductions</span>
-                        <span
-                          className={clsx(
-                            'font-bold tabular-nums normal-case text-[11px] px-2 py-0.5 rounded-md border',
-                            c && c.chalu_after_paise + c.moto_after_paise > 0
-                              ? 'bg-amber-50 text-amber-900 border-amber-200/70'
-                              : 'bg-white text-stone-500 border-stone-200',
-                          )}
-                          title={`Chalu: ${formatMoney(c ? c.chalu_after_paise : 0)} + Main: ${formatMoney(c ? c.moto_after_paise : 0)}`}
-                        >
-                          Remaining: <strong>{formatMoney(c ? c.chalu_after_paise + c.moto_after_paise : 0)}</strong>
-                        </span>
-                      </div>
-
-                      <div className="space-y-2">
-                        {/* Chalu Loan Card */}
-                        {isChaluOn && (
-                        <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-stone-900">Chalu Loan</span>
-                              <span className="rounded bg-amber-50 text-amber-900 border border-amber-200/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
-                                Bal: {c ? formatMoney(c.chalu_balance_paise) : '₹0'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="0"
-                                value={inp.cr}
-                                onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
-                                className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
-                              />
-                              {c && c.chalu_balance_paise > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                                    setRowField(emp.id, 'cr', (maxVal / 100).toString())
-                                  }}
-                                  className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
-                                  title="Deduct maximum possible"
-                                >
-                                  Max
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Last Taken & Last Paid Context */}
-                          <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
-                            <div className="flex items-center gap-1">
-                              <span className="text-stone-400">Last taken:</span>
-                              <span className="font-semibold text-stone-700">
-                                {chaluGiven && chaluGiven.date
-                                  ? `${formatMoney(chaluGiven.amount_paise)} (${formatDateShort(chaluGiven.date)})`
-                                  : (emp.opening_chalu_paise ?? 0) > 0
-                                    ? `${formatMoney(emp.opening_chalu_paise ?? 0)} (Opening)`
-                                    : '—'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-stone-400">Last paid:</span>
-                              <span className="font-semibold text-stone-700">
-                                {chaluPaid && chaluPaid.date
-                                  ? `${formatMoney(chaluPaid.amount_paise)} (${formatDateShort(chaluPaid.date)})`
-                                  : '—'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                    {/* Block 2: Upad Deductions */}
+                    {upadConfig.hasAny && (
+                      <div
+                        className={clsx(
+                          'rounded-xl border border-stone-200/90 bg-stone-50/70 p-3 space-y-2',
+                          upadConfig.isBothOn ? 'flex flex-col justify-between' : 'flex flex-col justify-start',
                         )}
-
-                        {/* Main Loan Card */}
-                        {isMotoOn && (
-                        <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
-                          <div className="flex items-center justify-between gap-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-stone-900">Main Loan</span>
-                              <span className="rounded bg-purple-50 text-purple-900 border border-purple-200/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
-                                Bal: {c ? formatMoney(c.moto_balance_paise) : '₹0'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="0"
-                                value={inp.mr}
-                                onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
-                                className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
-                              />
-                              {c && c.moto_balance_paise > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const crVal = parseMoneyInput(inp.cr)
-                                    const maxVal = Math.min(
-                                      c.moto_balance_paise,
-                                      Math.max(0, c.total_due_paise - crVal),
-                                    )
-                                    setRowField(emp.id, 'mr', (maxVal / 100).toString())
-                                  }}
-                                  className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
-                                  title="Deduct maximum possible"
-                                >
-                                  Max
-                                </button>
+                      >
+                        <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-stone-700 border-b border-stone-200/80 pb-1.5">
+                          <span>2. {upadConfig.sectionTitle}</span>
+                          <span
+                            className={clsx(
+                              'font-bold tabular-nums normal-case text-[11px] px-2 py-0.5 rounded-md border',
+                              c && c.chalu_after_paise + c.moto_after_paise > 0
+                                ? 'bg-amber-50 text-amber-900 border-amber-200/70'
+                                : 'bg-white text-stone-500 border-stone-200',
+                            )}
+                            title={
+                              upadConfig.isBothOn
+                                ? `${upadConfig.chaluLabel}: ${formatMoney(c ? c.chalu_after_paise : 0)} + ${upadConfig.motoLabel}: ${formatMoney(c ? c.moto_after_paise : 0)}`
+                                : undefined
+                            }
+                          >
+                            Remaining:{' '}
+                            <strong>
+                              {formatMoney(
+                                upadConfig.isBothOn
+                                  ? (c ? c.chalu_after_paise + c.moto_after_paise : 0)
+                                  : upadConfig.singleBucket?.id === 'chalu'
+                                    ? (c ? c.chalu_after_paise : 0)
+                                    : (c ? c.moto_after_paise : 0),
                               )}
-                            </div>
-                          </div>
-
-                          {/* Last Taken & Last Paid Context */}
-                          <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
-                            <div className="flex items-center gap-1">
-                              <span className="text-stone-400">Last taken:</span>
-                              <span className="font-semibold text-stone-700">
-                                {motoGiven && motoGiven.date
-                                  ? `${formatMoney(motoGiven.amount_paise)} (${formatDateShort(motoGiven.date)})`
-                                  : (emp.opening_moto_paise ?? 0) > 0
-                                    ? `${formatMoney(emp.opening_moto_paise ?? 0)} (Opening)`
-                                    : '—'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-stone-400">Last paid:</span>
-                              <span className="font-semibold text-stone-700">
-                                {motoPaid && motoPaid.date
-                                  ? `${formatMoney(motoPaid.amount_paise)} (${formatDateShort(motoPaid.date)})`
-                                  : '—'}
-                              </span>
-                            </div>
-                          </div>
+                            </strong>
+                          </span>
                         </div>
+
+                        {upadConfig.isOnlyOneOn && (() => {
+                          const b = upadConfig.singleBucket!
+                          const isChalu = b.id === 'chalu'
+                          const balPaise = c ? (isChalu ? c.chalu_balance_paise : c.moto_balance_paise) : 0
+                          const cutVal = isChalu ? inp.cr : inp.mr
+                          const setCut = (val: string) => setRowField(emp.id, isChalu ? 'cr' : 'mr', val)
+                          const lastGiven = isChalu ? chaluGiven : motoGiven
+                          const lastPaid = isChalu ? chaluPaid : motoPaid
+                          const openingPaise = isChalu ? (emp.opening_chalu_paise ?? 0) : (emp.opening_moto_paise ?? 0)
+                          const cutPaise = c ? (isChalu ? c.chalu_recovery_paise : c.moto_recovery_paise) : 0
+
+                          return (
+                            <div className="space-y-2">
+                              <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold text-stone-900">{b.label}</span>
+                                    <span
+                                      className={clsx(
+                                        'rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums border',
+                                        isChalu
+                                          ? 'bg-amber-50 text-amber-900 border-amber-200/60'
+                                          : 'bg-purple-50 text-purple-900 border-purple-200/60',
+                                      )}
+                                    >
+                                      Bal: {formatMoney(balPaise)}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder="0"
+                                      value={cutVal}
+                                      onChange={(e) => setCut(e.target.value)}
+                                      className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
+                                    />
+                                    {c && balPaise > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const maxVal = Math.min(balPaise, c.total_due_paise)
+                                          setCut((maxVal / 100).toString())
+                                        }}
+                                        className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
+                                        title="Deduct maximum possible"
+                                      >
+                                        Max
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Last Taken & Last Paid Context */}
+                                <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-stone-400">Last taken:</span>
+                                    <span className="font-semibold text-stone-700">
+                                      {lastGiven && lastGiven.date
+                                        ? `${formatMoney(lastGiven.amount_paise)} (${formatDateShort(lastGiven.date)})`
+                                        : openingPaise > 0
+                                          ? `${formatMoney(openingPaise)} (Opening)`
+                                          : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-stone-400">Last paid:</span>
+                                    <span className="font-semibold text-stone-700">
+                                      {lastPaid && lastPaid.date
+                                        ? `${formatMoney(lastPaid.amount_paise)} (${formatDateShort(lastPaid.date)})`
+                                        : '—'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Total Deducted directly under the single row */}
+                              <div className="border-t border-stone-200/90 pt-1.5 flex justify-between font-bold text-stone-900">
+                                <span className="text-xs font-bold text-stone-800">Total Deducted:</span>
+                                <span className="tabular-nums text-xs font-black text-rose-700">
+                                  -{formatMoney(cutPaise)}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })()}
+
+                        {upadConfig.isBothOn && (
+                          <>
+                            <div className="space-y-2">
+                              {/* Chalu Upad Card */}
+                              <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold text-stone-900">{upadConfig.chaluLabel}</span>
+                                    <span className="rounded bg-amber-50 text-amber-900 border border-amber-200/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
+                                      Bal: {c ? formatMoney(c.chalu_balance_paise) : '₹0'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder="0"
+                                      value={inp.cr}
+                                      onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
+                                      className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
+                                    />
+                                    {c && c.chalu_balance_paise > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
+                                          setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                                        }}
+                                        className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
+                                        title="Deduct maximum possible"
+                                      >
+                                        Max
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Last Taken & Last Paid Context */}
+                                <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-stone-400">Last taken:</span>
+                                    <span className="font-semibold text-stone-700">
+                                      {chaluGiven && chaluGiven.date
+                                        ? `${formatMoney(chaluGiven.amount_paise)} (${formatDateShort(chaluGiven.date)})`
+                                        : (emp.opening_chalu_paise ?? 0) > 0
+                                          ? `${formatMoney(emp.opening_chalu_paise ?? 0)} (Opening)`
+                                          : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-stone-400">Last paid:</span>
+                                    <span className="font-semibold text-stone-700">
+                                      {chaluPaid && chaluPaid.date
+                                        ? `${formatMoney(chaluPaid.amount_paise)} (${formatDateShort(chaluPaid.date)})`
+                                        : '—'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Moto Upad Card */}
+                              <div className="rounded-lg border border-stone-200 bg-white p-2.5 shadow-2xs space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold text-stone-900">{upadConfig.motoLabel}</span>
+                                    <span className="rounded bg-purple-50 text-purple-900 border border-purple-200/60 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
+                                      Bal: {c ? formatMoney(c.moto_balance_paise) : '₹0'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-stone-400 font-medium">Cut:</span>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder="0"
+                                      value={inp.mr}
+                                      onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
+                                      className="h-7.5 w-20 px-2 text-right font-bold text-xs rounded-md border border-stone-300 bg-white tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none"
+                                    />
+                                    {c && c.moto_balance_paise > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const crVal = parseMoneyInput(inp.cr)
+                                          const maxVal = Math.min(
+                                            c.moto_balance_paise,
+                                            Math.max(0, c.total_due_paise - crVal),
+                                          )
+                                          setRowField(emp.id, 'mr', (maxVal / 100).toString())
+                                        }}
+                                        className="text-[10px] font-bold text-stone-700 hover:bg-stone-100 px-2 py-1 rounded-md border border-stone-300 bg-stone-50 cursor-pointer transition"
+                                        title="Deduct maximum possible"
+                                      >
+                                        Max
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Last Taken & Last Paid Context */}
+                                <div className="flex flex-wrap items-center justify-between text-[10px] pt-1 border-t border-stone-100 gap-1 text-stone-500">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-stone-400">Last taken:</span>
+                                    <span className="font-semibold text-stone-700">
+                                      {motoGiven && motoGiven.date
+                                        ? `${formatMoney(motoGiven.amount_paise)} (${formatDateShort(motoGiven.date)})`
+                                        : (emp.opening_moto_paise ?? 0) > 0
+                                          ? `${formatMoney(emp.opening_moto_paise ?? 0)} (Opening)`
+                                          : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-stone-400">Last paid:</span>
+                                    <span className="font-semibold text-stone-700">
+                                      {motoPaid && motoPaid.date
+                                        ? `${formatMoney(motoPaid.amount_paise)} (${formatDateShort(motoPaid.date)})`
+                                        : '—'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="border-t border-stone-200/90 pt-1.5 flex justify-between font-bold text-stone-900">
+                              <span className="text-xs font-bold text-stone-800">Total Deducted:</span>
+                              <span className="tabular-nums text-xs font-black text-rose-700">
+                                -{formatMoney(c ? c.chalu_recovery_paise + c.moto_recovery_paise : 0)}
+                              </span>
+                            </div>
+                          </>
                         )}
                       </div>
-
-                      <div className="border-t border-stone-200/90 pt-1.5 flex justify-between font-bold text-stone-900">
-                        <span className="text-xs font-bold text-stone-800">Total Deducted:</span>
-                        <span className="tabular-nums text-xs font-black text-rose-700">
-                          -{formatMoney(c ? c.chalu_recovery_paise + c.moto_recovery_paise : 0)}
-                        </span>
-                      </div>
-                    </div>
+                    )}
 
                     {/* Block 3: Cash Handover (Main Hero Focus) */}
                     <div className="rounded-xl border border-emerald-300/80 bg-emerald-50/50 p-3 flex flex-col justify-between space-y-2">
@@ -1089,35 +1203,59 @@ export default function PayoutScreen({
                       </div>
 
                       <div className="grid grid-cols-2 gap-2.5">
-                        {/* New Chalu Upad */}
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[11px] font-bold text-emerald-950">
-                            New Chalu Upad:
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={inp.ngChalu ?? ''}
-                            onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
-                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
-                          />
-                        </div>
+                        {/* New Upads */}
+                        {upadConfig.isBothOn && (
+                          <>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] font-bold text-emerald-950">
+                                New {upadConfig.chaluLabel}:
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={inp.ngChalu ?? ''}
+                                onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
+                                className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] font-bold text-purple-950">
+                                New {upadConfig.motoLabel}:
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={inp.ngMoto ?? ''}
+                                onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
+                                className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                              />
+                            </div>
+                          </>
+                        )}
 
-                        {/* New Main Upad */}
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[11px] font-bold text-purple-950">
-                            New Main Upad:
-                          </label>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            placeholder="0"
-                            value={inp.ngMoto ?? ''}
-                            onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
-                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
-                          />
-                        </div>
+                        {upadConfig.isOnlyOneOn && (() => {
+                          const isChalu = upadConfig.singleBucket!.id === 'chalu'
+                          const fieldKey = isChalu ? 'ngChalu' : 'ngMoto'
+                          const val = isChalu ? inp.ngChalu : inp.ngMoto
+
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <label className="text-[11px] font-bold text-emerald-950">
+                                {upadConfig.singleBucket!.newLabel}:
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={val ?? ''}
+                                onChange={(e) => setRowField(emp.id, fieldKey, e.target.value)}
+                                className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                              />
+                            </div>
+                          )
+                        })()}
 
                         {/* Adjustment (+/-) */}
                         <div className="flex flex-col gap-1">
@@ -1135,7 +1273,7 @@ export default function PayoutScreen({
                         </div>
 
                         {/* Salary Paid */}
-                        <div className="flex flex-col gap-1">
+                        <div className={clsx("flex flex-col gap-1", upadConfig.isOnlyOneOn && "col-span-2")}>
                           <div className="flex items-center justify-between text-[11px] font-bold text-emerald-950">
                             <span>Salary Paid:</span>
                             {inp.sp !== '' && (
@@ -1155,8 +1293,7 @@ export default function PayoutScreen({
                             placeholder={c ? paiseToInput(c.payable_paise) : '0'}
                             value={inp.sp}
                             onChange={(e) => setRowField(emp.id, 'sp', e.target.value)}
-                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-400 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
-                            title="Leave blank to pay full payable amount"
+                            className="h-7.5 w-full px-2 text-right font-bold text-xs rounded-md border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
                           />
                         </div>
                       </div>
@@ -1169,8 +1306,17 @@ export default function PayoutScreen({
                           </div>
                           <div className="text-[10px] text-emerald-100/90 font-medium">
                             {r.salaryPaidPaise > 0 && `${formatMoney(r.salaryPaidPaise)} Sal`}
-                            {parseMoneyInput(inp.ngChalu) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngChalu))} Chalu`}
-                            {parseMoneyInput(inp.ngMoto) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngMoto))} Main`}
+                            {upadConfig.isBothOn && (
+                              <>
+                                {parseMoneyInput(inp.ngChalu) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngChalu))} ${upadConfig.chaluLabel}`}
+                                {parseMoneyInput(inp.ngMoto) > 0 && ` + ${formatMoney(parseMoneyInput(inp.ngMoto))} ${upadConfig.motoLabel}`}
+                              </>
+                            )}
+                            {upadConfig.isOnlyOneOn && (() => {
+                              const isChalu = upadConfig.singleBucket!.id === 'chalu'
+                              const amt = parseMoneyInput(isChalu ? inp.ngChalu : inp.ngMoto)
+                              return amt > 0 ? ` + ${formatMoney(amt)} ${upadConfig.singleBucket!.label}` : null
+                            })()}
                             {parseMoneyInput(inp.adj) !== 0 && ` (${parseMoneyInput(inp.adj) > 0 ? '+' : ''}${formatMoney(parseMoneyInput(inp.adj))} Adj)`}
                           </div>
                           {c && r.closingCarryPaise > 0 && (
@@ -1207,19 +1353,31 @@ export default function PayoutScreen({
                 <th colSpan={2} className="py-1 px-2 text-center border-r border-stone-200">
                   Current Work
                 </th>
-                <th
-                  colSpan={2}
-                  className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900"
-                >
-                  Chalu Loan
-                </th>
-                <th
-                  colSpan={2}
-                  className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900"
-                >
-                  Moto Loan
-                </th>
-                <th colSpan={8} className="py-1 px-2.5 text-center bg-emerald-50/50 text-emerald-950">
+                {upadConfig.isBothOn && (
+                  <>
+                    <th
+                      colSpan={2}
+                      className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900"
+                    >
+                      {upadConfig.chaluLabel}
+                    </th>
+                    <th
+                      colSpan={2}
+                      className="py-1 px-2 text-center bg-purple-50/70 border-r border-purple-200 text-purple-900"
+                    >
+                      {upadConfig.motoLabel}
+                    </th>
+                  </>
+                )}
+                {upadConfig.isOnlyOneOn && (
+                  <th
+                    colSpan={2}
+                    className="py-1 px-2 text-center bg-amber-50/70 border-r border-amber-200 text-amber-900"
+                  >
+                    {upadConfig.sectionTitle}
+                  </th>
+                )}
+                <th colSpan={upadConfig.isBothOn ? 8 : upadConfig.isOnlyOneOn ? 7 : 6} className="py-1 px-2.5 text-center bg-emerald-50/50 text-emerald-950">
                   Settlement & Cash Handover
                 </th>
               </tr>
@@ -1255,48 +1413,80 @@ export default function PayoutScreen({
                 >
                   Adj
                 </th>
-                <th
-                  className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500"
-                  title="Current Chalu balance"
-                >
-                  Chalu Bal
-                </th>
-                <th
-                  className="py-1.5 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200 text-amber-900"
-                  title="Chalu recovery to deduct"
-                >
-                  Chalu Cut ₹
-                </th>
-                <th
-                  className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500"
-                  title="Current Moto balance"
-                >
-                  Moto Bal
-                </th>
-                <th
-                  className="py-1.5 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200 text-amber-900"
-                  title="Moto recovery to deduct"
-                >
-                  Moto Cut ₹
-                </th>
+                {upadConfig.isBothOn && (
+                  <>
+                    <th
+                      className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500"
+                      title={`Current ${upadConfig.chaluLabel} balance`}
+                    >
+                      {upadConfig.chaluLabel} Bal
+                    </th>
+                    <th
+                      className="py-1.5 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200 text-amber-900"
+                      title={`${upadConfig.chaluLabel} recovery to deduct`}
+                    >
+                      {upadConfig.chaluLabel} Cut ₹
+                    </th>
+                    <th
+                      className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500"
+                      title={`Current ${upadConfig.motoLabel} balance`}
+                    >
+                      {upadConfig.motoLabel} Bal
+                    </th>
+                    <th
+                      className="py-1.5 px-2 text-center whitespace-nowrap bg-purple-50/70 border-r border-purple-200 text-purple-900"
+                      title={`${upadConfig.motoLabel} recovery to deduct`}
+                    >
+                      {upadConfig.motoLabel} Cut ₹
+                    </th>
+                  </>
+                )}
+                {upadConfig.isOnlyOneOn && (
+                  <>
+                    <th
+                      className="py-1.5 px-2 text-right whitespace-nowrap text-stone-500"
+                      title={`Current ${upadConfig.singleBucket!.label} balance`}
+                    >
+                      {upadConfig.singleBucket!.label} Bal
+                    </th>
+                    <th
+                      className="py-1.5 px-2 text-center whitespace-nowrap bg-amber-50/70 border-r border-amber-200 text-amber-900"
+                      title={`${upadConfig.singleBucket!.label} recovery to deduct`}
+                    >
+                      {upadConfig.singleBucket!.cutLabel} ₹
+                    </th>
+                  </>
+                )}
                 <th
                   className="py-1.5 px-2.5 text-right whitespace-nowrap font-black text-stone-900 bg-stone-100 border-r border-stone-200"
-                  title="Net salary due after deducting loans"
+                  title="Net salary due after deducting upad"
                 >
                   Payable
                 </th>
-                <th
-                  className="py-1.5 px-2 text-center whitespace-nowrap"
-                  title="Give new Chalu upad cash today"
-                >
-                  New Chalu ₹
-                </th>
-                <th
-                  className="py-1.5 px-2 text-center whitespace-nowrap"
-                  title="Give new Main upad cash today"
-                >
-                  New Main ₹
-                </th>
+                {upadConfig.isBothOn && (
+                  <>
+                    <th
+                      className="py-1.5 px-2 text-center whitespace-nowrap"
+                      title={`Give new ${upadConfig.chaluLabel} cash today`}
+                    >
+                      New {upadConfig.chaluLabel} ₹
+                    </th>
+                    <th
+                      className="py-1.5 px-2 text-center whitespace-nowrap"
+                      title={`Give new ${upadConfig.motoLabel} cash today`}
+                    >
+                      New {upadConfig.motoLabel} ₹
+                    </th>
+                  </>
+                )}
+                {upadConfig.isOnlyOneOn && (
+                  <th
+                    className="py-1.5 px-2 text-center whitespace-nowrap"
+                    title={`Give new ${upadConfig.singleBucket!.label} cash today`}
+                  >
+                    New {upadConfig.singleBucket!.label} ₹
+                  </th>
+                )}
                 <th
                   className="py-1.5 px-2 text-center whitespace-nowrap"
                   title="Adjustment: +Bonus or -Fine"
@@ -1328,7 +1518,7 @@ export default function PayoutScreen({
             <tbody className="divide-y divide-stone-100 font-medium">
               {includedRows.length === 0 ? (
                 <tr>
-                  <td colSpan={15} className="py-8 text-center text-stone-400 text-xs font-semibold">
+                  <td colSpan={upadConfig.isBothOn ? 16 : upadConfig.isOnlyOneOn ? 14 : 11} className="py-8 text-center text-stone-400 text-xs font-semibold">
                     No active workers found for this payout cutoff ({formatDateShort(cutoff)})
                   </td>
                 </tr>
@@ -1342,8 +1532,8 @@ export default function PayoutScreen({
 
                 const handleQuickSettle = () => {
                   if (!c) return
-                  const crVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                  const mrVal = Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal))
+                  const crVal = upadConfig.isChaluOn ? Math.min(c.chalu_balance_paise, c.total_due_paise) : 0
+                  const mrVal = upadConfig.isMotoOn ? Math.min(c.moto_balance_paise, Math.max(0, c.total_due_paise - crVal)) : 0
                   const netAfter = Math.max(0, c.total_due_paise - crVal - mrVal)
                   setInputs((prev) => ({
                     ...prev,
@@ -1453,122 +1643,196 @@ export default function PayoutScreen({
                       )}
                     </td>
 
-                    {/* 5. Chalu Bal */}
-                    <td
-                      className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-amber-800"
-                      title="Click balance to fill Chalu Cut"
-                      onClick={() => {
-                        if (!c || c.chalu_balance_paise === 0) return
-                        const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                        setRowField(emp.id, 'cr', (maxVal / 100).toString())
-                      }}
-                    >
-                      {c && c.chalu_balance_paise > 0 ? formatMoney(c.chalu_balance_paise) : '0'}
-                    </td>
+                    {/* Upad Bal & Cut */}
+                    {upadConfig.isBothOn && (
+                      <>
+                        {/* Chalu Bal */}
+                        <td
+                          className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-amber-800"
+                          title={`Click balance to fill ${upadConfig.chaluLabel} Cut`}
+                          onClick={() => {
+                            if (!c || c.chalu_balance_paise === 0) return
+                            const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
+                            setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                          }}
+                        >
+                          {c && c.chalu_balance_paise > 0 ? formatMoney(c.chalu_balance_paise) : '0'}
+                        </td>
 
-                    {/* 6. Chalu Cut ₹ */}
-                    <td className="py-0.5 px-1 text-center bg-amber-50/40 border-r border-amber-200/50">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          value={inp.cr}
-                          onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
-                          className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
-                        />
-                        {c && c.chalu_balance_paise > 0 && (
-                          <button
-                            type="button"
+                        {/* Chalu Cut ₹ */}
+                        <td className="py-0.5 px-1 text-center bg-amber-50/40 border-r border-amber-200/50">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={inp.cr}
+                              onChange={(e) => setRowField(emp.id, 'cr', e.target.value)}
+                              className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
+                            />
+                            {c && c.chalu_balance_paise > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
+                                  setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                                }}
+                                className="text-[9px] font-bold text-amber-800 hover:bg-amber-100 px-1 py-0.5 rounded cursor-pointer"
+                                title="Fill maximum recoverable"
+                              >
+                                Max
+                              </button>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Moto Bal */}
+                        <td
+                          className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-purple-800"
+                          title={`Click balance to fill ${upadConfig.motoLabel} Cut`}
+                          onClick={() => {
+                            if (!c || c.moto_balance_paise === 0) return
+                            const crVal = parseMoneyInput(inp.cr)
+                            const maxVal = Math.min(
+                              c.moto_balance_paise,
+                              Math.max(0, c.total_due_paise - crVal),
+                            )
+                            setRowField(emp.id, 'mr', (maxVal / 100).toString())
+                          }}
+                        >
+                          {c && c.moto_balance_paise > 0 ? formatMoney(c.moto_balance_paise) : '0'}
+                        </td>
+
+                        {/* Moto Cut ₹ */}
+                        <td className="py-0.5 px-1 text-center bg-purple-50/40 border-r border-purple-200/50">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="0"
+                              value={inp.mr}
+                              onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
+                              className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                            />
+                            {c && c.moto_balance_paise > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const crVal = parseMoneyInput(inp.cr)
+                                  const maxVal = Math.min(
+                                    c.moto_balance_paise,
+                                    Math.max(0, c.total_due_paise - crVal),
+                                  )
+                                  setRowField(emp.id, 'mr', (maxVal / 100).toString())
+                                }}
+                                className="text-[9px] font-bold text-purple-800 hover:bg-purple-100 px-1 py-0.5 rounded cursor-pointer"
+                                title="Fill maximum recoverable"
+                              >
+                                Max
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </>
+                    )}
+
+                    {upadConfig.isOnlyOneOn && (() => {
+                      const isChalu = upadConfig.singleBucket!.id === 'chalu'
+                      const balPaise = c ? (isChalu ? c.chalu_balance_paise : c.moto_balance_paise) : 0
+                      const cutVal = isChalu ? inp.cr : inp.mr
+                      const fieldKey = isChalu ? 'cr' : 'mr'
+
+                      return (
+                        <>
+                          <td
+                            className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-amber-800"
+                            title={`Click balance to fill ${upadConfig.singleBucket!.label} Cut`}
                             onClick={() => {
-                              const maxVal = Math.min(c.chalu_balance_paise, c.total_due_paise)
-                              setRowField(emp.id, 'cr', (maxVal / 100).toString())
+                              if (!c || balPaise === 0) return
+                              const maxVal = Math.min(balPaise, c.total_due_paise)
+                              setRowField(emp.id, fieldKey, (maxVal / 100).toString())
                             }}
-                            className="text-[9px] font-bold text-amber-800 hover:bg-amber-100 px-1 py-0.5 rounded"
-                            title="Fill maximum recoverable"
                           >
-                            Max
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                    {/* 7. Moto Bal */}
-                    <td
-                      className="py-1 px-2 text-right tabular-nums text-stone-500 cursor-pointer hover:text-amber-800"
-                      title="Click balance to fill Moto Cut"
-                      onClick={() => {
-                        if (!c || c.moto_balance_paise === 0) return
-                        const crVal = parseMoneyInput(inp.cr)
-                        const maxVal = Math.min(
-                          c.moto_balance_paise,
-                          Math.max(0, c.total_due_paise - crVal),
-                        )
-                        setRowField(emp.id, 'mr', (maxVal / 100).toString())
-                      }}
-                    >
-                      {c && c.moto_balance_paise > 0 ? formatMoney(c.moto_balance_paise) : '0'}
-                    </td>
-
-                    {/* 8. Moto Cut ₹ */}
-                    <td className="py-0.5 px-1 text-center bg-amber-50/40 border-r border-amber-200/50">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="0"
-                          value={inp.mr}
-                          onChange={(e) => setRowField(emp.id, 'mr', e.target.value)}
-                          className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
-                        />
-                        {c && c.moto_balance_paise > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const crVal = parseMoneyInput(inp.cr)
-                              const maxVal = Math.min(
-                                c.moto_balance_paise,
-                                Math.max(0, c.total_due_paise - crVal),
-                              )
-                              setRowField(emp.id, 'mr', (maxVal / 100).toString())
-                            }}
-                            className="text-[9px] font-bold text-amber-800 hover:bg-amber-100 px-1 py-0.5 rounded"
-                            title="Fill maximum recoverable"
-                          >
-                            Max
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                            {balPaise > 0 ? formatMoney(balPaise) : '0'}
+                          </td>
+                          <td className="py-0.5 px-1 text-center bg-amber-50/40 border-r border-amber-200/50">
+                            <div className="flex items-center justify-center gap-0.5">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0"
+                                value={cutVal}
+                                onChange={(e) => setRowField(emp.id, fieldKey, e.target.value)}
+                                className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-stone-300 bg-white tabular-nums focus:border-amber-600 focus:outline-none"
+                              />
+                              {c && balPaise > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const maxVal = Math.min(balPaise, c.total_due_paise)
+                                    setRowField(emp.id, fieldKey, (maxVal / 100).toString())
+                                  }}
+                                  className="text-[9px] font-bold text-amber-800 hover:bg-amber-100 px-1 py-0.5 rounded cursor-pointer"
+                                  title="Fill maximum recoverable"
+                                >
+                                  Max
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </>
+                      )
+                    })()}
 
                     {/* 9. Net Payable */}
                     <td className="py-1 px-2.5 text-right tabular-nums font-black text-xs text-stone-900 bg-stone-100 border-r border-stone-200">
                       {c ? formatMoney(c.payable_paise) : '—'}
                     </td>
 
-                    {/* 10. New Chalu Upad ₹ */}
-                    <td className="py-0.5 px-1 text-center">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="0"
-                        value={inp.ngChalu ?? ''}
-                        onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
-                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
-                      />
-                    </td>
+                    {/* New Upads */}
+                    {upadConfig.isBothOn && (
+                      <>
+                        <td className="py-0.5 px-1 text-center">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={inp.ngChalu ?? ''}
+                            onChange={(e) => setRowField(emp.id, 'ngChalu', e.target.value)}
+                            className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                          />
+                        </td>
+                        <td className="py-0.5 px-1 text-center">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={inp.ngMoto ?? ''}
+                            onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
+                            className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
+                          />
+                        </td>
+                      </>
+                    )}
 
-                    {/* 11. New Main Upad ₹ */}
-                    <td className="py-0.5 px-1 text-center">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="0"
-                        value={inp.ngMoto ?? ''}
-                        onChange={(e) => setRowField(emp.id, 'ngMoto', e.target.value)}
-                        className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-purple-300 bg-white tabular-nums focus:border-purple-600 focus:outline-none"
-                      />
-                    </td>
+                    {upadConfig.isOnlyOneOn && (() => {
+                      const isChalu = upadConfig.singleBucket!.id === 'chalu'
+                      const fieldKey = isChalu ? 'ngChalu' : 'ngMoto'
+                      const val = isChalu ? inp.ngChalu : inp.ngMoto
+
+                      return (
+                        <td className="py-0.5 px-1 text-center">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="0"
+                            value={val ?? ''}
+                            onChange={(e) => setRowField(emp.id, fieldKey, e.target.value)}
+                            className="h-6.5 w-16 px-1 text-right font-bold text-xs rounded border border-emerald-300 bg-white tabular-nums focus:border-emerald-600 focus:outline-none"
+                          />
+                        </td>
+                      )
+                    })()}
 
                     {/* 12. Adjustment (+/-) ₹ */}
                     <td className="py-0.5 px-1 text-center">
@@ -1632,11 +1896,11 @@ export default function PayoutScreen({
                         <span className="text-rose-700 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 text-[10px]">
                           {r.errors.map((err) => formatEngineError(err)).join('; ')}
                         </span>
-                      ) : isInactive && c && (c.chalu_balance_paise > 0 || c.moto_balance_paise > 0) ? (
+                      ) : isInactive && c && ((upadConfig.isChaluOn && c.chalu_balance_paise > 0) || (upadConfig.isMotoOn && c.moto_balance_paise > 0)) ? (
                         <button
                           type="button"
                           onClick={handleQuickSettle}
-                          className="rounded bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-900 border border-amber-300 transition"
+                          className="rounded bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 text-[9px] font-bold text-amber-900 border border-amber-300 transition cursor-pointer"
                           title="Offset balance against carry and pay net"
                         >
                           Settle Inactive
@@ -1674,27 +1938,59 @@ export default function PayoutScreen({
                       : formatMoney(totals.adj)
                     : '—'}
                 </td>
-                <td className="py-1.5 px-2 text-right text-stone-500">
-                  {formatMoney(totals.chaluBal)}
-                </td>
-                <td className="py-1.5 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
-                  -{formatMoney(totals.chaluRec)}
-                </td>
-                <td className="py-1.5 px-2 text-right text-stone-500">
-                  {formatMoney(totals.motoBal)}
-                </td>
-                <td className="py-1.5 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
-                  -{formatMoney(totals.motoRec)}
-                </td>
+                {upadConfig.isBothOn && (
+                  <>
+                    <td className="py-1.5 px-2 text-right text-stone-500">
+                      {formatMoney(totals.chaluBal)}
+                    </td>
+                    <td className="py-1.5 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
+                      -{formatMoney(totals.chaluRec)}
+                    </td>
+                    <td className="py-1.5 px-2 text-right text-stone-500">
+                      {formatMoney(totals.motoBal)}
+                    </td>
+                    <td className="py-1.5 px-2 text-center bg-purple-100/60 border-r border-purple-200 text-purple-950 font-bold">
+                      -{formatMoney(totals.motoRec)}
+                    </td>
+                  </>
+                )}
+                {upadConfig.isOnlyOneOn && (() => {
+                  const isChalu = upadConfig.singleBucket!.id === 'chalu'
+                  const bal = isChalu ? totals.chaluBal : totals.motoBal
+                  const rec = isChalu ? totals.chaluRec : totals.motoRec
+                  return (
+                    <>
+                      <td className="py-1.5 px-2 text-right text-stone-500">
+                        {formatMoney(bal)}
+                      </td>
+                      <td className="py-1.5 px-2 text-center bg-amber-100/60 border-r border-amber-200 text-amber-950 font-bold">
+                        -{formatMoney(rec)}
+                      </td>
+                    </>
+                  )
+                })()}
                 <td className="py-1.5 px-2.5 text-right font-black text-stone-950 bg-stone-200/70 border-r border-stone-200">
                   {formatMoney(totals.payable)}
                 </td>
-                <td className="py-1.5 px-2 text-center text-emerald-800">
-                  {totals.newChalu > 0 ? `+${formatMoney(totals.newChalu)}` : '—'}
-                </td>
-                <td className="py-1.5 px-2 text-center text-purple-800">
-                  {totals.newMoto > 0 ? `+${formatMoney(totals.newMoto)}` : '—'}
-                </td>
+                {upadConfig.isBothOn && (
+                  <>
+                    <td className="py-1.5 px-2 text-center text-emerald-800">
+                      {totals.newChalu > 0 ? `+${formatMoney(totals.newChalu)}` : '—'}
+                    </td>
+                    <td className="py-1.5 px-2 text-center text-purple-800">
+                      {totals.newMoto > 0 ? `+${formatMoney(totals.newMoto)}` : '—'}
+                    </td>
+                  </>
+                )}
+                {upadConfig.isOnlyOneOn && (() => {
+                  const isChalu = upadConfig.singleBucket!.id === 'chalu'
+                  const newAmt = isChalu ? totals.newChalu : totals.newMoto
+                  return (
+                    <td className="py-1.5 px-2 text-center text-emerald-800">
+                      {newAmt > 0 ? `+${formatMoney(newAmt)}` : '—'}
+                    </td>
+                  )
+                })()}
                 <td className="py-1.5 px-2 text-center text-stone-800">
                   {totals.payoutAdj !== 0
                     ? totals.payoutAdj > 0
@@ -1728,6 +2024,7 @@ export default function PayoutScreen({
       {inspectingRow && inspectingRow.computation && (
         <WorkerInspectorDrawer
           row={inspectingRow}
+          upadConfig={upadConfig}
           onClose={() => setInspectingWorkerId(null)}
         />
       )}
@@ -1752,6 +2049,7 @@ export default function PayoutScreen({
 
 function WorkerInspectorDrawer({
   row,
+  upadConfig,
   onClose,
 }: {
   row: {
@@ -1761,6 +2059,7 @@ function WorkerInspectorDrawer({
     warnings: EngineWarning[]
     unmarkedDates: string[]
   }
+  upadConfig: ReturnType<typeof useUpadBuckets>
   onClose: () => void
 }) {
   const emp = row.context.employee
@@ -1805,7 +2104,9 @@ function WorkerInspectorDrawer({
                   <div>
                     <strong className="text-stone-900">{formatDateLong(d.date)}</strong>
                     <span className="ml-2 rounded bg-white px-1.5 py-0.5 font-bold text-stone-700 border border-stone-200">
-                      {STATUS_LETTER[d.status] ?? d.status}
+                      {d.status === 'hours'
+                        ? `${d.worked_minutes ? (d.worked_minutes % 60 === 0 ? d.worked_minutes / 60 : (d.worked_minutes / 60).toFixed(1)) : 0}h`
+                        : (STATUS_LETTER[d.status] ?? d.status)}
                     </span>
                     {d.is_late_entry && (
                       <span className="ml-1 text-[10px] font-bold text-amber-800 bg-amber-100 px-1 rounded">
@@ -1824,23 +2125,27 @@ function WorkerInspectorDrawer({
             </div>
           </div>
 
-          {/* Loan & Balances Summary */}
+          {/* Balances Summary */}
           <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 space-y-2 text-xs">
             <div className="font-bold text-stone-900 uppercase text-[10px] tracking-wider">
-              Upad & Loan Balances
+              {upadConfig.hasAny ? 'Upad Balances' : 'Cycle Balances'}
             </div>
             <div className="flex justify-between">
               <span className="text-stone-600">Opening Carry:</span>
               <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.carry_paise)}</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-stone-600">Chalu Upad Balance:</span>
-              <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.chalu_balance_paise)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-stone-600">Moto Upad Balance:</span>
-              <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.moto_balance_paise)}</span>
-            </div>
+            {upadConfig.isChaluOn && (
+              <div className="flex justify-between">
+                <span className="text-stone-600">{upadConfig.chaluLabel} Balance:</span>
+                <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.chalu_balance_paise)}</span>
+              </div>
+            )}
+            {upadConfig.isMotoOn && (
+              <div className="flex justify-between">
+                <span className="text-stone-600">{upadConfig.motoLabel} Balance:</span>
+                <span className="font-bold tabular-nums text-stone-900">{formatMoney(c.moto_balance_paise)}</span>
+              </div>
+            )}
             <div className="border-t border-stone-200 pt-1.5 flex justify-between font-bold">
               <span className="text-stone-800">Gross Available:</span>
               <span className="font-black tabular-nums text-emerald-800">{formatMoney(c.total_due_paise)}</span>
