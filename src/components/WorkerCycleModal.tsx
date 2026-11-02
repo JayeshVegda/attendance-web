@@ -19,7 +19,7 @@ import { formatDateLong, formatDateShort, parseDate } from '../lib/dates'
 import { formatHours, formatMoney, paiseToInput, parseMoneyInput } from '../lib/money'
 import { latestStatementByEmployee } from '../lib/payroll'
 import { createUpadEntry } from '../lib/api'
-import { isChaluUpadEnabled, isMotoUpadEnabled } from '../lib/cycle'
+import { isChaluUpadEnabled, isMotoUpadEnabled, useUpadBuckets } from '../lib/cycle'
 import { SettleModal, type SettleTarget } from './SettleModal'
 import type {
   Adjustment,
@@ -79,9 +79,10 @@ export function WorkerCycleModal({
   const [activePopoverDate, setActivePopoverDate] = useState<string | null>(null)
   const [settleTarget, setSettleTarget] = useState<SettleTarget | null>(null)
 
-  const isChaluOn = isChaluUpadEnabled(settings)
-  const isMotoOn = isMotoUpadEnabled(settings)
-  const hasAnyUpad = isChaluOn || isMotoOn
+  const upadConfig = useUpadBuckets(settings)
+  const isChaluOn = upadConfig.isChaluOn
+  const isMotoOn = upadConfig.isMotoOn
+  const hasAnyUpad = upadConfig.hasAny
 
   // Settlement Inputs
   const [chaluCut, setChaluCut] = useState(() => currentInput.chaluRecovery ?? currentInput.recovery ?? '')
@@ -89,7 +90,7 @@ export function WorkerCycleModal({
   const [salaryPaid, setSalaryPaid] = useState(() => currentInput.paid ?? '')
   const [newUpadAmount, setNewUpadAmount] = useState(() => currentInput.newUpadAmount ?? '')
   const [newUpadBucket, setNewUpadBucket] = useState<'chalu' | 'moto'>(
-    () => currentInput.newUpadBucket ?? 'chalu',
+    () => currentInput.newUpadBucket ?? (upadConfig.singleBucket ? upadConfig.singleBucket.id : 'chalu'),
   )
 
   // Engine Context Data
@@ -312,14 +313,16 @@ export function WorkerCycleModal({
       size="lg"
       footer={
         <div className="flex items-center justify-between w-full">
-          <Button
-            variant="ghost"
-            onClick={onOpenUpad}
-            className="text-amber-800 hover:bg-amber-50 font-bold text-xs flex items-center gap-1.5"
-          >
-            <HandCoins className="h-4 w-4 text-amber-700" />
-            <span>Manage Upad Ledger</span>
-          </Button>
+          {upadConfig.hasAny ? (
+            <Button
+              variant="ghost"
+              onClick={onOpenUpad}
+              className="text-amber-800 hover:bg-amber-50 font-bold text-xs flex items-center gap-1.5"
+            >
+              <HandCoins className="h-4 w-4 text-amber-700" />
+              <span>Manage Upad Ledger</span>
+            </Button>
+          ) : <div />}
 
           <div className="flex items-center gap-2">
             <Button
@@ -431,34 +434,42 @@ export function WorkerCycleModal({
                   </div>
 
                   {/* Line 3: Small Chips for Upad Activity */}
-                  <div className="flex flex-wrap items-center justify-center gap-1 pt-1 border-t border-stone-200/70 min-h-[18px]">
-                    {dayUpads.length === 0 ? (
-                      <span className="text-[10px] text-stone-400 font-medium">No Upad</span>
-                    ) : (
-                      dayUpads.slice(0, 2).map((u) => {
-                        const isChalu = u.category === 'chalu' || u.category === 'regular'
-                        const isGiven = u.kind === 'given'
-                        const isReturned = u.kind === 'returned'
-                        const sym = isChalu ? 'C' : 'M'
-                        const amtStr = Math.round(u.amount_paise / 100)
-                        return (
-                          <span
-                            key={u.id}
-                            className={clsx(
-                              'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums border leading-none shadow-2xs',
-                              isChalu
-                                ? 'bg-amber-50 text-amber-900 border-amber-200'
-                                : 'bg-purple-50 text-purple-900 border-purple-200',
-                            )}
-                          >
-                            {isGiven ? <ArrowDown className="h-2.5 w-2.5 stroke-[2.5]" /> : isReturned ? <ArrowUp className="h-2.5 w-2.5 stroke-[2.5]" /> : null}
-                            <span>₹{amtStr}</span>
-                            <span className="opacity-70 font-semibold">{sym}</span>
-                          </span>
-                        )
-                      })
-                    )}
-                  </div>
+                  {upadConfig.hasAny && (
+                    <div className="flex flex-wrap items-center justify-center gap-1 pt-1 border-t border-stone-200/70 min-h-[18px]">
+                      {dayUpads.length === 0 ? (
+                        <span className="text-[10px] text-stone-400 font-medium">No Upad</span>
+                      ) : (
+                        dayUpads
+                          .filter((u) => {
+                            const isChalu = u.category === 'chalu' || u.category === 'regular'
+                            return isChalu ? upadConfig.isChaluOn : upadConfig.isMotoOn
+                          })
+                          .slice(0, 2)
+                          .map((u) => {
+                            const isChalu = u.category === 'chalu' || u.category === 'regular'
+                            const isGiven = u.kind === 'given'
+                            const isReturned = u.kind === 'returned'
+                            const sym = upadConfig.isBothOn ? (isChalu ? 'C' : 'M') : ''
+                            const amtStr = Math.round(u.amount_paise / 100)
+                            return (
+                              <span
+                                key={u.id}
+                                className={clsx(
+                                  'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold tabular-nums border leading-none shadow-2xs',
+                                  isChalu
+                                    ? 'bg-amber-50 text-amber-900 border-amber-200'
+                                    : 'bg-purple-50 text-purple-900 border-purple-200',
+                                )}
+                              >
+                                {isGiven ? <ArrowDown className="h-2.5 w-2.5 stroke-[2.5]" /> : isReturned ? <ArrowUp className="h-2.5 w-2.5 stroke-[2.5]" /> : null}
+                                <span>₹{amtStr}</span>
+                                {sym && <span className="opacity-70 font-semibold">{sym}</span>}
+                              </span>
+                            )
+                          })
+                      )}
+                    </div>
+                  )}
                 </button>
               )
             })}
@@ -497,25 +508,29 @@ export function WorkerCycleModal({
               </div>
               <div className="text-xs text-stone-700">
                 {selectedDayUpads.length === 0 ? (
-                  <span className="text-stone-500 italic">No loan/advance records on this day.</span>
+                  <span className="text-stone-500 italic">No upad records on this day.</span>
                 ) : (
                   <div className="space-y-1.5">
-                    {selectedDayUpads.map((u) => (
-                      <div key={u.id} className="flex items-center gap-2">
-                        <span
-                          className={clsx(
-                            'px-2 py-0.5 rounded text-xs font-bold uppercase tracking-tight',
-                            u.category === 'extra' || u.category === 'moto'
-                              ? 'bg-purple-100 text-purple-900 border border-purple-200'
-                              : 'bg-amber-100 text-amber-900 border border-amber-200',
-                          )}
-                        >
-                          {u.kind === 'given' ? 'Taken' : u.kind === 'returned' ? 'Returned' : 'Recovery'} · {u.category || 'Chalu'}
-                        </span>
-                        <span className="font-bold tabular-nums text-stone-900 text-xs">{formatMoney(u.amount_paise)}</span>
-                        {u.note && <span className="text-stone-500 font-medium">({u.note})</span>}
-                      </div>
-                    ))}
+                    {selectedDayUpads.map((u) => {
+                      const isMoto = u.category === 'extra' || u.category === 'moto'
+                      const bucketLabel = isMoto ? upadConfig.motoLabel : upadConfig.chaluLabel
+                      return (
+                        <div key={u.id} className="flex items-center gap-2">
+                          <span
+                            className={clsx(
+                              'px-2 py-0.5 rounded text-xs font-bold uppercase tracking-tight',
+                              isMoto
+                                ? 'bg-purple-100 text-purple-900 border border-purple-200'
+                                : 'bg-amber-100 text-amber-900 border border-amber-200',
+                            )}
+                          >
+                            {u.kind === 'given' ? 'Taken' : u.kind === 'returned' ? 'Returned' : 'Recovery'} · {bucketLabel}
+                          </span>
+                          <span className="font-bold tabular-nums text-stone-900 text-xs">{formatMoney(u.amount_paise)}</span>
+                          {u.note && <span className="text-stone-500 font-medium">({u.note})</span>}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -524,7 +539,7 @@ export function WorkerCycleModal({
         </div>
 
         {/* Section 2 - Financial Summary KPI Row */}
-        <div className={clsx('grid gap-3', isChaluOn && isMotoOn ? 'grid-cols-3' : hasAnyUpad ? 'grid-cols-2' : 'grid-cols-1')}>
+        <div className={clsx('grid gap-3', upadConfig.isBothOn ? 'grid-cols-3' : upadConfig.hasAny ? 'grid-cols-2' : 'grid-cols-1')}>
           <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
             <div className="text-xs font-semibold text-stone-600">
               Gross Due
@@ -537,11 +552,11 @@ export function WorkerCycleModal({
             </div>
           </div>
 
-          {isChaluOn && (
+          {upadConfig.isChaluOn && (
             <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-stone-600">
-                  {isMotoOn ? 'Chalu Upad Balance' : 'Upad Balance'}
+                  {upadConfig.isBothOn ? `${upadConfig.chaluLabel} Balance` : 'Upad Balance'}
                 </span>
                 <div className="flex items-center gap-1.5">
                   {chaluBal > 0 && (
@@ -574,16 +589,16 @@ export function WorkerCycleModal({
                 {formatMoney(chaluBal)}
               </div>
               <div className="text-xs text-stone-500 font-normal">
-                Current weekly advance
+                {upadConfig.chaluLabel} account
               </div>
             </div>
           )}
 
-          {isMotoOn && (
+          {upadConfig.isMotoOn && (
             <div className="rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs flex flex-col justify-between">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-stone-600">
-                  {isChaluOn ? 'Main Loan Balance' : 'Loan Balance'}
+                  {upadConfig.isBothOn ? `${upadConfig.motoLabel} Balance` : 'Upad Balance'}
                 </span>
                 <div className="flex items-center gap-1.5">
                   {motoBal > 0 && (
@@ -607,7 +622,7 @@ export function WorkerCycleModal({
                   )}
                   {motoBal > 0 && (
                     <span className="rounded bg-purple-50 text-purple-900 border border-purple-200/70 px-1.5 py-0.2 text-[10px] font-bold">
-                      Loan
+                      Active
                     </span>
                   )}
                 </div>
@@ -616,93 +631,97 @@ export function WorkerCycleModal({
                 {formatMoney(motoBal)}
               </div>
               <div className="text-xs text-stone-500 font-normal">
-                Long-term loan account
+                {upadConfig.motoLabel} account
               </div>
             </div>
           )}
         </div>
 
         {/* Section 3 - Settlement Inputs & Handover */}
-        <div className="grid grid-cols-2 gap-3.5">
-          {/* Left Column: Loan Deductions */}
-          <div className="rounded-2xl border border-stone-200/90 bg-stone-50/70 p-4 space-y-3 shadow-2xs">
-            <div className="text-xs font-bold uppercase tracking-wider text-stone-800 border-b border-stone-200/80 pb-2 flex justify-between items-center">
-              <span>1. Loan Deductions</span>
-              <span className="text-xs font-semibold text-stone-600 tabular-nums normal-case">
-                Total Balance: <strong className="text-stone-900">{formatMoney(chaluBal + motoBal)}</strong>
-              </span>
-            </div>
+        <div className={clsx('grid gap-3.5', upadConfig.hasAny ? 'grid-cols-2' : 'grid-cols-1')}>
+          {/* Left Column: Upad Deductions */}
+          {upadConfig.hasAny && (
+            <div className="rounded-2xl border border-stone-200/90 bg-stone-50/70 p-4 space-y-3 shadow-2xs flex flex-col justify-between">
+              <div className="text-xs font-bold uppercase tracking-wider text-stone-800 border-b border-stone-200/80 pb-2 flex justify-between items-center">
+                <span>1. {upadConfig.sectionTitle}</span>
+                <span className="text-xs font-semibold text-stone-600 tabular-nums normal-case">
+                  Total Balance: <strong className="text-stone-900">{formatMoney(upadConfig.isBothOn ? (chaluBal + motoBal) : upadConfig.singleBucket?.id === 'chalu' ? chaluBal : motoBal)}</strong>
+                </span>
+              </div>
 
-{isChaluOn && (
-            <div>
-              <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
-                <span>{isMotoOn ? 'Chalu Loan Cut:' : 'Loan Cut:'}</span>
-                <button
-                  type="button"
-                  onClick={() => setChaluCut(paiseToInput(Math.min(chaluBal, grossDue)))}
-                  className="text-xs font-bold text-stone-700 hover:text-stone-900 hover:bg-stone-200/70 px-2 py-0.5 rounded-md border border-stone-300 bg-white cursor-pointer transition shadow-2xs"
-                >
-                  Max ({formatMoney(Math.min(chaluBal, grossDue))})
-                </button>
-              </div>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={chaluCut}
-                  onChange={(e) => setChaluCut(e.target.value)}
-                  className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
-                />
-              </div>
-              {chaluError && (
-                <p className="text-xs text-rose-600 font-bold mt-1">
-                  Exceeds balance by {formatMoney(chaluError.amount)}
-                </p>
-              )}
-            </div>
-            )}
+              <div className="space-y-3">
+                {upadConfig.isChaluOn && (
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
+                      <span>{upadConfig.isBothOn ? `${upadConfig.chaluLabel} Cut:` : `${upadConfig.chaluLabel} Cut:`}</span>
+                      <button
+                        type="button"
+                        onClick={() => setChaluCut(paiseToInput(Math.min(chaluBal, grossDue)))}
+                        className="text-xs font-bold text-stone-700 hover:text-stone-900 hover:bg-stone-200/70 px-2 py-0.5 rounded-md border border-stone-300 bg-white cursor-pointer transition shadow-2xs"
+                      >
+                        Max ({formatMoney(Math.min(chaluBal, grossDue))})
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={chaluCut}
+                        onChange={(e) => setChaluCut(e.target.value)}
+                        className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
+                      />
+                    </div>
+                    {chaluError && (
+                      <p className="text-xs text-rose-600 font-bold mt-1">
+                        Exceeds balance by {formatMoney(chaluError.amount)}
+                      </p>
+                    )}
+                  </div>
+                )}
 
-{isMotoOn && (
-            <div>
-              <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
-                <span>{isChaluOn ? 'Main Loan Cut:' : 'Loan Cut:'}</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const maxVal = Math.min(motoBal, Math.max(0, grossDue - chaluCutPaise))
-                    setMainCut(paiseToInput(maxVal))
-                  }}
-                  className="text-xs font-bold text-stone-700 hover:text-stone-900 hover:bg-stone-200/70 px-2 py-0.5 rounded-md border border-stone-300 bg-white cursor-pointer transition shadow-2xs"
-                >
-                  Max ({formatMoney(Math.min(motoBal, Math.max(0, grossDue - chaluCutPaise)))})
-                </button>
+                {upadConfig.isMotoOn && (
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
+                      <span>{upadConfig.isBothOn ? `${upadConfig.motoLabel} Cut:` : `${upadConfig.motoLabel} Cut:`}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const maxVal = Math.min(motoBal, Math.max(0, grossDue - (upadConfig.isChaluOn ? chaluCutPaise : 0)))
+                          setMainCut(paiseToInput(maxVal))
+                        }}
+                        className="text-xs font-bold text-stone-700 hover:text-stone-900 hover:bg-stone-200/70 px-2 py-0.5 rounded-md border border-stone-300 bg-white cursor-pointer transition shadow-2xs"
+                      >
+                        Max ({formatMoney(Math.min(motoBal, Math.max(0, grossDue - (upadConfig.isChaluOn ? chaluCutPaise : 0))))})
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={mainCut}
+                        onChange={(e) => setMainCut(e.target.value)}
+                        className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
+                      />
+                    </div>
+                    {mainError && (
+                      <p className="text-xs text-rose-600 font-bold mt-1">
+                        Exceeds balance by {formatMoney(mainError.amount)}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={mainCut}
-                  onChange={(e) => setMainCut(e.target.value)}
-                  className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
-                />
-              </div>
-              {mainError && (
-                <p className="text-xs text-rose-600 font-bold mt-1">
-                  Exceeds balance by {formatMoney(mainError.amount)}
-                </p>
-              )}
             </div>
-            )}
-          </div>
+          )}
 
           {/* Right Column: Salary Paid & Fresh Advance */}
           <div className="rounded-2xl border border-stone-200/90 bg-stone-50/70 p-4 space-y-3 shadow-2xs">
             <div className="text-xs font-bold uppercase tracking-wider text-stone-800 border-b border-stone-200/80 pb-2 flex justify-between items-center">
-              <span>2. Cash Settlement</span>
+              <span>{upadConfig.hasAny ? '2. Cash Settlement' : 'Cash Settlement'}</span>
               <span className="text-xs font-semibold text-emerald-800 tabular-nums normal-case">
                 Net Payable: <strong className="text-emerald-900">{formatMoney(netPayable)}</strong>
               </span>
@@ -739,53 +758,79 @@ export function WorkerCycleModal({
             </div>
 
             {/* New Upad Advance */}
-            <div>
-              <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
-                <span>New Advance Given:</span>
-                <div className="inline-flex rounded-md border border-stone-300 overflow-hidden text-xs font-bold shadow-2xs">
-                  <button
-                    type="button"
-                    onClick={() => setNewUpadBucket('chalu')}
-                    className={clsx(
-                      'px-2.5 py-0.5 transition cursor-pointer',
-                      newUpadBucket === 'chalu'
-                        ? 'bg-amber-600 text-white'
-                        : 'bg-white text-stone-600 hover:bg-stone-50',
-                    )}
-                  >
-                    Chalu
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewUpadBucket('moto')}
-                    className={clsx(
-                      'px-2.5 py-0.5 transition cursor-pointer border-l border-stone-200',
-                      newUpadBucket === 'moto'
-                        ? 'bg-purple-700 text-white'
-                        : 'bg-white text-stone-600 hover:bg-stone-50',
-                    )}
-                  >
-                    Main
-                  </button>
+            {upadConfig.isBothOn && (
+              <div>
+                <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
+                  <span>New Advance Given:</span>
+                  <div className="inline-flex rounded-md border border-stone-300 overflow-hidden text-xs font-bold shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setNewUpadBucket('chalu')}
+                      className={clsx(
+                        'px-2.5 py-0.5 transition cursor-pointer',
+                        newUpadBucket === 'chalu'
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-white text-stone-600 hover:bg-stone-50',
+                      )}
+                    >
+                      {upadConfig.chaluLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewUpadBucket('moto')}
+                      className={clsx(
+                        'px-2.5 py-0.5 transition cursor-pointer border-l border-stone-200',
+                        newUpadBucket === 'moto'
+                          ? 'bg-purple-700 text-white'
+                          : 'bg-white text-stone-600 hover:bg-stone-50',
+                      )}
+                    >
+                      {upadConfig.motoLabel}
+                    </button>
+                  </div>
                 </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={newUpadAmount}
+                    onChange={(e) => setNewUpadAmount(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
+                  />
+                </div>
+                {newUpadError && (
+                  <p className="text-xs text-rose-600 font-bold mt-1">
+                    New advance cannot be negative
+                  </p>
+                )}
               </div>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={newUpadAmount}
-                  onChange={(e) => setNewUpadAmount(e.target.value)}
-                  className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
-                />
+            )}
+
+            {upadConfig.isOnlyOneOn && (
+              <div>
+                <div className="flex items-center justify-between text-xs font-bold text-stone-800 mb-1.5">
+                  <span>{upadConfig.singleBucket!.newLabel}:</span>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-stone-400">₹</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={newUpadAmount}
+                    onChange={(e) => setNewUpadAmount(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-stone-300 bg-white pl-7 pr-3 text-right text-sm font-bold text-stone-900 tabular-nums focus:border-stone-500 focus:ring-1 focus:ring-stone-400 focus:outline-none shadow-2xs"
+                  />
+                </div>
+                {newUpadError && (
+                  <p className="text-xs text-rose-600 font-bold mt-1">
+                    New advance cannot be negative
+                  </p>
+                )}
               </div>
-              {newUpadError && (
-                <p className="text-xs text-rose-600 font-bold mt-1">
-                  New advance cannot be negative
-                </p>
-              )}
-            </div>
+            )}
           </div>
         </div>
 
@@ -793,9 +838,9 @@ export function WorkerCycleModal({
         <div className="flex justify-center">
           <div className="rounded-full bg-stone-100/90 border border-stone-200 px-4 py-1 text-xs text-stone-600 font-medium tracking-tight">
             Gross {formatMoney(grossDue)}
-            {chaluCutPaise > 0 ? ` − Chalu Cut ${formatMoney(chaluCutPaise)}` : ''}
-            {mainCutPaise > 0 ? ` − Main Cut ${formatMoney(mainCutPaise)}` : ''}
-            {newUpadPaise > 0 ? ` + New Advance ${formatMoney(newUpadPaise)}` : ''}
+            {upadConfig.isChaluOn && chaluCutPaise > 0 ? ` − ${upadConfig.chaluLabel} Cut ${formatMoney(chaluCutPaise)}` : ''}
+            {upadConfig.isMotoOn && mainCutPaise > 0 ? ` − ${upadConfig.motoLabel} Cut ${formatMoney(mainCutPaise)}` : ''}
+            {upadConfig.hasAny && newUpadPaise > 0 ? ` + New Advance ${formatMoney(newUpadPaise)}` : ''}
             {` = Net Cash ${formatMoney(cashToHandPaise)}`}
           </div>
         </div>
@@ -809,8 +854,8 @@ export function WorkerCycleModal({
             </div>
             <div className="text-xs text-emerald-100 font-medium">
               Salary: <strong>{formatMoney(spPaise)}</strong>
-              {newUpadPaise > 0
-                ? ` + Advance: ${formatMoney(newUpadPaise)} (${newUpadBucket === 'moto' ? 'Main' : 'Chalu'})`
+              {upadConfig.hasAny && newUpadPaise > 0
+                ? ` + Advance: ${formatMoney(newUpadPaise)}${upadConfig.isBothOn ? ` (${newUpadBucket === 'moto' ? upadConfig.motoLabel : upadConfig.chaluLabel})` : ''}`
                 : ''}
             </div>
           </div>
@@ -826,14 +871,18 @@ export function WorkerCycleModal({
             <strong className="text-stone-900 font-bold">{formatMoney(closingCarryPaise)}</strong>
             <span className="text-stone-400 text-xs ml-1">(unpaid salary)</span>
           </div>
-          <div className="h-4 w-px bg-stone-300" />
-          <div>
-            <span className="text-stone-500">Total Upad Remaining: </span>
-            <strong className="text-amber-900 font-extrabold">{formatMoney(chaluLeftPaise + motoLeftPaise)}</strong>
-            <span className="text-stone-500 text-xs ml-1.5 font-medium">
-              (Chalu: {formatMoney(chaluLeftPaise)}, Main: {formatMoney(motoLeftPaise)})
-            </span>
-          </div>
+          {(() => {
+            const footer = upadConfig.formatRemainingFooter(chaluLeftPaise, motoLeftPaise)
+            if (!footer) return null
+            return (
+              <>
+                <div className="h-4 w-px bg-stone-300" />
+                <div>
+                  <strong className="text-amber-900 font-extrabold">{footer.text}</strong>
+                </div>
+              </>
+            )
+          })()}
         </div>
       </div>
     </Modal>
