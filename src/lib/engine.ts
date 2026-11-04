@@ -41,24 +41,27 @@ export type UpadRow = {
   id: string;
   employee: string;
   date: string;
-  bucket: Bucket;
+  bucket?: Bucket;
   kind: UpadKind;
   amount_paise: Paise;
+  note?: string;
   voided?: boolean;
 };
 
 export type WorkerRef = {
   id: string;
   opening_carry_paise: Paise;
-  opening_chalu_paise: Paise;
-  opening_moto_paise: Paise;
+  opening_upad_paise?: Paise;
+  opening_chalu_paise?: Paise;
+  opening_moto_paise?: Paise;
   opening_date: string;
   daily_rate_paise?: Paise;
 };
 
 export type PayoutInputs = {
-  chalu_recovery_paise: Paise;
-  moto_recovery_paise: Paise;
+  upad_deduction_paise?: Paise;
+  chalu_recovery_paise?: Paise;
+  moto_recovery_paise?: Paise;
   salary_paid_paise: Paise;
   new_upad_bucket?: Bucket;
   new_upad_given_paise?: Paise;
@@ -199,6 +202,66 @@ export function inAnyPeriod(periods: PeriodRow[], date: string): boolean {
   );
 }
 
+export function getWorkerUpadBalance(
+  rows: UpadRow[],
+  opening_paise: Paise = 0,
+  as_of?: string
+): Paise {
+  let sum = opening_paise;
+  for (const row of rows) {
+    if (row.voided) continue;
+    if (as_of && row.date > as_of) continue;
+    if (row.kind === "given") sum += row.amount_paise;
+    else if (row.kind === "returned" || row.kind === "recovery" || row.kind === "writeoff") {
+      sum -= row.amount_paise;
+    }
+  }
+  return sum;
+}
+
+export function getWorkerUpadLedger(
+  rows: UpadRow[],
+  opening_paise: Paise = 0,
+  as_of?: string
+): { date: string; kind: UpadKind; amount_paise: Paise; balance_paise: Paise; note?: string; id?: string }[] {
+  const sorted = rows
+    .filter((r) => !r.voided && (!as_of || r.date <= as_of))
+    .sort((a, b) => (a.date === b.date ? (a.id || '').localeCompare(b.id || '') : a.date.localeCompare(b.date)));
+  let balance = opening_paise;
+  const out: { date: string; kind: UpadKind; amount_paise: Paise; balance_paise: Paise; note?: string; id?: string }[] = [];
+  if (opening_paise > 0) {
+    out.push({ date: "", kind: "given", amount_paise: opening_paise, balance_paise: opening_paise, note: "Opening Balance" });
+  }
+  for (const r of sorted) {
+    if (r.kind === "given") balance += r.amount_paise;
+    else balance -= r.amount_paise;
+    out.push({ id: r.id, date: r.date, kind: r.kind, amount_paise: r.amount_paise, balance_paise: balance, note: r.note });
+  }
+  return out;
+}
+
+export function calculateDeductCap(upadBalancePaise: Paise, salaryDuePaise: Paise): Paise {
+  return Math.min(Math.max(0, upadBalancePaise), Math.max(0, salaryDuePaise));
+}
+
+export function calculateToPay(
+  carryPaise: Paise,
+  earnedPaise: Paise,
+  adjustmentPaise: Paise,
+  deductPaise: Paise,
+  giveUpadPaise: Paise
+): Paise {
+  return Math.max(0, carryPaise + earnedPaise + adjustmentPaise - deductPaise + giveUpadPaise);
+}
+
+export function calculatePaidCap(toPayPaise: Paise): Paise {
+  return Math.max(0, toPayPaise);
+}
+
+export function calculateNewCarry(toPayPaise: Paise, paidPaise: Paise): Paise {
+  return Math.max(0, toPayPaise - paidPaise);
+}
+
 export function upadBalance(
   rows: UpadRow[],
   bucket: Bucket,
@@ -230,7 +293,7 @@ export function chaluLedger(
   for (const r of sorted) {
     if (r.kind === "given") balance += r.amount_paise;
     else balance -= r.amount_paise;
-    out.push({ date: r.date, bucket: r.bucket, kind: r.kind, amount_paise: r.amount_paise, balance_paise: balance });
+    out.push({ date: r.date, bucket: r.bucket ?? "chalu", kind: r.kind, amount_paise: r.amount_paise, balance_paise: balance });
   }
   return out;
 }
@@ -380,18 +443,23 @@ export function computePayout(
   const totalDue = carry + earned + adjustmentsSum;
   const available = Math.max(0, totalDue);
 
+  const effectiveOpeningUpad = worker.opening_upad_paise ?? worker.opening_chalu_paise ?? 0;
+  const singleUpadBal = getWorkerUpadBalance(upad_entries, effectiveOpeningUpad, cutoff);
+
   const chaluBalance = isChaluOn
-    ? upadBalance(upad_entries, "chalu", worker.opening_chalu_paise, cutoff)
+    ? (worker.opening_upad_paise !== undefined
+        ? singleUpadBal
+        : upadBalance(upad_entries, "chalu", worker.opening_chalu_paise ?? 0, cutoff))
     : 0;
   const motoBalance = isMotoOn
-    ? upadBalance(upad_entries, "moto", worker.opening_moto_paise, cutoff)
+    ? upadBalance(upad_entries, "moto", worker.opening_moto_paise ?? 0, cutoff)
     : 0;
 
   const chaluMaxRec = Math.max(0, chaluBalance);
   const motoMaxRec = Math.max(0, motoBalance);
 
-  const actualChaluRec = isChaluOn ? inputs.chalu_recovery_paise : 0;
-  const actualMotoRec = isMotoOn ? inputs.moto_recovery_paise : 0;
+  const actualChaluRec = isChaluOn ? (inputs.chalu_recovery_paise ?? inputs.upad_deduction_paise ?? 0) : 0;
+  const actualMotoRec = isMotoOn ? (inputs.moto_recovery_paise ?? 0) : 0;
 
   const errors: EngineError[] = [];
   if (isChaluOn && (actualChaluRec < 0 || actualChaluRec > chaluMaxRec)) {

@@ -375,6 +375,7 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  printable = false,
 }: {
   open: boolean
   onClose: () => void
@@ -383,6 +384,7 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
+  printable?: boolean
 }) {
   useEffect(() => {
     if (!open) return
@@ -401,9 +403,15 @@ export function Modal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4 no-print">
+    <div
+      className={cn(
+        'fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4',
+        !printable && 'no-print',
+        printable && 'print:static print:inset-auto print:z-auto print:block print:p-0 print:m-0 print:bg-white',
+      )}
+    >
       <button
-        className="absolute inset-0 bg-stone-950/45 backdrop-blur-[2px] transition-opacity"
+        className="absolute inset-0 bg-stone-950/45 backdrop-blur-[2px] transition-opacity no-print"
         onClick={onClose}
         aria-label="Close dialog"
       />
@@ -414,9 +422,10 @@ export function Modal({
           size === 'md' && 'sm:max-w-xl',
           size === 'lg' && 'sm:max-w-3xl',
           size === 'xl' && 'sm:max-w-5xl',
+          printable && 'print:max-h-none print:w-full print:max-w-none print:border-none print:shadow-none print:rounded-none print:bg-white',
         )}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-stone-200/80 px-6 py-4 bg-stone-50/50">
+        <div className="flex items-start justify-between gap-4 border-b border-stone-200/80 px-6 py-4 bg-stone-50/50 no-print">
           <div>
             <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">{title}</h2>
             {description && <p className="mt-1 text-xs sm:text-sm text-stone-600 font-medium leading-normal">{description}</p>}
@@ -429,9 +438,11 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 py-4 sm:px-6">{children}</div>
+        <div className={cn('overflow-y-auto px-5 py-4 sm:px-6', printable && 'print:overflow-visible print:p-0 print:m-0')}>
+          {children}
+        </div>
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-stone-100 bg-stone-50/80 px-5 py-3 sm:px-6">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-stone-100 bg-stone-50/80 px-5 py-3 sm:px-6 no-print">
             {footer}
           </div>
         )}

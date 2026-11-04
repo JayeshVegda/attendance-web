@@ -42,6 +42,16 @@ textarea {
   font: inherit;
 }
 
+/* Hide number input spinners across all browsers */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
 button {
   cursor: pointer;
 }
@@ -128,20 +138,30 @@ button {
 
 /* Print styling */
 @media print {
-  .no-print {
+  .no-print, header, aside, nav {
     display: none !important;
   }
 
   body {
     background: white !important;
     color: black !important;
+    overflow: visible !important;
+  }
+
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
   }
 
   .print-area {
     box-shadow: none !important;
-    border: 1px solid #e2e8f0 !important;
+    border: 1px solid #cbd5e1 !important;
     border-radius: 0 !important;
     padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
   }
 
   .print-break {
@@ -149,7 +169,7 @@ button {
   }
 
   @page {
-    size: A4 landscape;
+    size: auto;
     margin: 8mm;
   }
 }

@@ -130,8 +130,8 @@ export default function PayoutScreen({
         ctx.attendance.some((a) => !a.settled && a.date <= cutoff) ||
         ctx.adjustments.some((a) => !a.settled && a.date <= cutoff)
       const carryDiffers = ctx.worker.opening_carry_paise !== 0
-      const chaluBal = isChaluOn ? upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise, cutoff) : 0
-      const motoBal = isMotoOn ? upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise, cutoff) : 0
+      const chaluBal = isChaluOn ? upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise ?? 0, cutoff) : 0
+      const motoBal = isMotoOn ? upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise ?? 0, cutoff) : 0
       const included = hasActivity || carryDiffers || chaluBal !== 0 || motoBal !== 0
 
       if (!included) {

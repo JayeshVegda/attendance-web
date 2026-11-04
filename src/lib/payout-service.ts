@@ -16,6 +16,7 @@ import {
   type AdjustmentRow,
   unmarkedDaysFor,
   upadBalance,
+  getWorkerUpadBalance,
 } from './engine'
 import { addDays } from './dates'
 import type {
@@ -155,6 +156,7 @@ export function contextsFromRaw(args: {
     const worker: WorkerRef = {
       id: e.id,
       opening_carry_paise: carryPaise,
+      opening_upad_paise: e.opening_upad_paise ?? 0,
       opening_chalu_paise: e.opening_chalu_paise ?? 0,
       opening_moto_paise: e.opening_moto_paise ?? 0,
       opening_date: normDate(e.opening_date) || normDate(e.joined_on),
@@ -322,8 +324,14 @@ export function buildPreview(
       ctx.attendance.some((a) => !a.settled && a.date <= cutoff) ||
       ctx.adjustments.some((a) => !a.settled && a.date <= cutoff)
     const carryDiffers = ctx.worker.opening_carry_paise !== 0
-    const chaluBalance = isChaluOn ? upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise, cutoff) : 0
-    const motoBalance = isMotoOn ? upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise, cutoff) : 0
+    const effectiveOpeningUpad = ctx.worker.opening_upad_paise ?? ctx.worker.opening_chalu_paise ?? 0
+    const singleUpadBal = getWorkerUpadBalance(ctx.upads, effectiveOpeningUpad, cutoff)
+    const chaluBalance = isChaluOn
+      ? (ctx.worker.opening_upad_paise !== undefined
+          ? singleUpadBal
+          : upadBalance(ctx.upads, 'chalu', ctx.worker.opening_chalu_paise ?? 0, cutoff))
+      : 0
+    const motoBalance = isMotoOn ? upadBalance(ctx.upads, 'moto', ctx.worker.opening_moto_paise ?? 0, cutoff) : 0
     const included = hasActivity || carryDiffers || chaluBalance !== 0 || motoBalance !== 0
     if (!included) {
       return { context: ctx, included: false, computation: null, errors: [], warnings: [], unmarkedDates: [] }

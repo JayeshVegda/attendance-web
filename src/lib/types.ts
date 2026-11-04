@@ -131,6 +131,33 @@ export type SalaryPayment = {
   created: string
 }
 
+export type SalaryWriteoff = {
+  id: string
+  worker: string
+  payout?: string
+  date: string
+  amount_paise: number
+  note: string
+  voided?: boolean
+  created?: string
+}
+
+export type CycleDraft = {
+  id: string
+  employee: string
+  cycle_start: string
+  deduct_paise: number
+  give_upad_paise: number
+  paid_paise: number | null
+  paid_date: string
+  work_counted_up_to: string
+  is_done: boolean
+  created_upad_ids?: string
+  note?: string
+  created?: string
+  updated?: string
+}
+
 export type AppSetting = {
   id: string
   key: string

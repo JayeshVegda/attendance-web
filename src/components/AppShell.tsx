@@ -17,7 +17,7 @@ import { getSettings } from '../lib/api'
 import { useUpadBuckets } from '../lib/cycle'
 import { getLanguage, setLanguage, t, type LanguageMode, type TranslationKey } from '../lib/i18n'
 
-export type View = 'attendance' | 'payout' | 'employees' | 'upad' | 'reports' | 'settings'
+export type View = 'attendance' | 'employees' | 'upad' | 'reports' | 'settings'
 
 const NAV: Array<{
   id: View
@@ -27,7 +27,6 @@ const NAV: Array<{
   badge?: string
 }> = [
   { id: 'attendance', tKey: 'nav_attendance', shortKey: 'nav_attendance', icon: CalendarCheck },
-  { id: 'payout', tKey: 'nav_payout', shortKey: 'nav_payout', icon: Banknote, badge: 'Pay' },
   { id: 'employees', tKey: 'nav_employees', shortKey: 'nav_employees', icon: Users },
   { id: 'upad', tKey: 'nav_upad', shortKey: 'nav_upad', icon: Coins },
   { id: 'reports', tKey: 'nav_reports', shortKey: 'nav_reports', icon: BarChart3 },
@@ -330,7 +329,7 @@ export function AppShell({
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 px-3 py-3 sm:px-4 sm:py-4 lg:px-5">
+        <main className="min-w-0 flex-1 px-3 py-3 sm:px-4 sm:py-4 lg:px-5 overflow-x-hidden">
           {children}
         </main>
       </div>

@@ -1,4 +1,5 @@
 import { WorkerCycleModal } from '../components/WorkerCycleModal'
+import { CycleRegisterTable } from '../components/CycleRegisterTable'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -191,7 +192,14 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
   const [workerUpadTarget, setWorkerUpadTarget] = useState<CycleRow | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [note, setNote] = useState('')
-  const [viewMode, setViewMode] = useState<ViewMode>('today')
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    return (localStorage.getItem('attendance_view_mode') as ViewMode) || 'cycle'
+  })
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    localStorage.setItem('attendance_view_mode', mode)
+    setViewMode(mode)
+  }
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState<'all' | 'active' | 'unmarkedToday'>('all')
   const [bulkMenuDate, setBulkMenuDate] = useState<string | null>(null)
@@ -615,106 +623,6 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
 
   return (
     <div>
-      <PageHeader
-        title="Attendance & Payout"
-        description="Daily attendance register, upad recovery, overtime tracking, and end-of-cycle salary settlement."
-        actions={
-          <>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setUpadEmployee(undefined)
-                setUpadOpen(true)
-              }}
-            >
-              <HandCoins className="h-4 w-4 text-amber-700" />
-              <span>Give Upad</span>
-            </Button>
-            <Button
-              variant="emerald"
-              size="sm"
-              onClick={() => setPreviewOpen(true)}
-              disabled={!rows.length || !validRange}
-            >
-              <Wallet className="h-4 w-4" />
-              <span>Close & Pay Cycle</span>
-            </Button>
-          </>
-        }
-      />
-
-      {/* Register Controls Toolbar */}
-      <Card className="mb-3 p-2.5">
-        <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            {/* View Mode Tabs */}
-            <Tabs
-              value={viewMode}
-              onChange={(mode) => setViewMode(mode as ViewMode)}
-              options={[
-                { id: 'today', label: "Today's Roll Call", icon: <CalendarCheck className="h-3.5 w-3.5" /> },
-                { id: 'cycle', label: 'Cycle Register', icon: <CalendarDays className="h-3.5 w-3.5" /> },
-              ]}
-            />
-
-            {/* Quick status filter */}
-            <div className="flex items-center gap-0.5 rounded-xl border border-stone-200/90 bg-stone-100/80 p-0.5 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => setFilterType('all')}
-                className={clsx(
-                  'rounded-lg px-2.5 py-1 transition-all',
-                  filterType === 'all'
-                    ? 'bg-white text-stone-900 shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900',
-                )}
-              >
-                All ({rows.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType('active')}
-                className={clsx(
-                  'rounded-lg px-2.5 py-1 transition-all',
-                  filterType === 'active'
-                    ? 'bg-white text-stone-900 shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900',
-                )}
-              >
-                Active ({rows.filter((r) => r.employee.active).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterType('unmarkedToday')}
-                className={clsx(
-                  'rounded-lg px-2.5 py-1 transition-all',
-                  filterType === 'unmarkedToday'
-                    ? 'bg-white text-stone-900 shadow-xs'
-                    : 'text-stone-600 hover:text-stone-900',
-                )}
-                title="Workers without an attendance mark today"
-              >
-                Unmarked Today
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <div className="w-full sm:w-56">
-              <SearchInput
-                placeholder="Search worker…"
-                value={search}
-                onChange={setSearch}
-              />
-            </div>
-            <span className="text-[11px] font-bold text-stone-500 shrink-0 hidden sm:inline">
-              OT divisor: <strong className="text-stone-900">{divisor}h</strong>
-            </span>
-          </div>
-        </div>
-      </Card>
-
       {/* Main Table Register Card */}
       <Card className="overflow-hidden">
         {errored ? (
@@ -766,17 +674,45 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
         ) : viewMode === 'today' ? (
           /* TODAY'S FAST ROLL CALL MODE (ZERO HORIZONTAL SCROLL) */
           <div className="divide-y divide-stone-100">
-            {/* Quick Bulk Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3.5 bg-stone-50/80 border-b border-stone-200">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-stone-900">
-                  {formatDateLong(today)}
-                </span>
-                <Badge tone="green" dot>
-                  {todayStats.marked} / {todayStats.activeTotal} Marked
-                </Badge>
+            {/* Unified Single Header Bar for Today's Roll Call */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-stone-200 bg-white px-3.5 py-2">
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* View Mode Tabs */}
+                <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100 p-0.5 text-xs font-bold text-stone-600">
+                  <button
+                    type="button"
+                    onClick={() => handleViewModeChange('today')}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-white px-2.5 py-1 text-emerald-800 shadow-2xs font-extrabold cursor-pointer"
+                  >
+                    <CalendarCheck className="h-3.5 w-3.5 text-emerald-700" />
+                    <span>Today's Roll Call</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleViewModeChange('cycle')}
+                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-stone-600 transition-all hover:text-stone-900 cursor-pointer"
+                  >
+                    <CalendarDays className="h-3.5 w-3.5 text-stone-400" />
+                    <span>Cycle Register</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs font-bold text-stone-900">
+                  <span>{formatDateLong(today)}</span>
+                  <Badge tone="green" dot>
+                    {todayStats.marked} / {todayStats.activeTotal} Marked
+                  </Badge>
+                </div>
               </div>
+
               <div className="flex items-center gap-2">
+                <div className="w-36 sm:w-48">
+                  <SearchInput
+                    placeholder="Search worker…"
+                    value={search}
+                    onChange={setSearch}
+                  />
+                </div>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -1097,656 +1033,28 @@ export default function AttendancePage({ onNavigate }: { onNavigate: (path: stri
             })}
           </div>
         ) : (
-          <>
-            {/* Step 1 Header Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-emerald-200 bg-gradient-to-r from-emerald-50 via-teal-50 to-stone-50 px-4 py-3 text-xs">
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={clsx(
-                    'rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-white',
-                    isPastCycle ? 'bg-stone-600' : 'bg-emerald-700'
-                  )}>
-                    {isPastCycle ? 'Viewing History' : 'Step 1: Check Attendance'}
-                  </span>
-
-                  {/* Previous Cycles Dropdown Selector */}
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={selectedCycleId}
-                      onChange={(e) => setSelectedCycleId(e.target.value)}
-                      aria-label="Select attendance cycle"
-                      className="rounded-lg border border-stone-300 bg-white px-2 py-1 text-xs font-bold text-stone-800 shadow-2xs focus:border-emerald-500 focus:outline-none cursor-pointer"
-                    >
-                      <option value="open">
-                        🟢 Open Cycle ({formatDateShort(openCycleStart)} – {formatDateShort(payoutDate)})
-                      </option>
-                      {completedRuns.map((run) => (
-                        <option key={run.id} value={run.id}>
-                          🔒 Closed: {formatDateShort(run.cycle_start)} – {formatDateShort(run.payout_date)} {run.note ? `(${run.note})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <span className="font-extrabold text-stone-900">
-                    Cycle {formatDateRange(cycleStart, gridEndDate)}
-                  </span>
-
-                  {!isPastCycle && lastPayout && (
-                    <span className="text-[11px] text-stone-500 font-medium hidden sm:inline">
-                      · Last payout closed {formatDateShort(lastPayout)}
-                    </span>
-                  )}
-                  {isPastCycle && (
-                    <span className="rounded bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.2 text-[10px] font-bold">
-                      Read-only
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-[11px] text-stone-600">
-                  {isPastCycle ? (
-                    <span>Viewing attendance records from a past closed cycle. All records are locked for audit.</span>
-                  ) : (
-                    <span>Verify marks below. Unmarked days are highlighted. When attendance is verified, proceed to Step 2.</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {isPastCycle ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setSelectedCycleId('open')}
-                    className="font-bold shrink-0 shadow-xs"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                    <span>Back to Open Cycle</span>
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    onClick={() => onNavigate('payout')}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold shrink-0 shadow-xs"
-                  >
-                    <span>Issue Payout (Step 2)</span>
-                    <ArrowRight className="h-3.5 w-3.5 ml-1" />
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-            <table className="w-full min-w-max border-separate border-spacing-0 text-xs attendance-grid">
-              <thead>
-                <tr>
-                  {/* Sticky Employee Header */}
-                  <th className="sticky left-0 top-0 z-30 min-w-[14.5rem] border-b border-stone-200 bg-stone-100 px-3.5 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-stone-700">
-                    Worker
-                  </th>
-
-                  {/* Daily Date Columns */}
-                  {days.map((day, dIdx) => {
-                      const isToday = day === today
-                      const isFri = isFriday(day)
-                      const dayTotal = dailyTotals[dIdx]
-                      // Only show OFF when 0 workers were marked on Friday (truly closed day)
-                      const isClosedDay = isFri && (!dayTotal || (dayTotal.present === 0 && dayTotal.half === 0))
-                      const isBulkOpen = bulkMenuDate === day
-                      return (
-                        <th
-                          key={day}
-                          className={clsx(
-                            'sticky top-0 z-10 min-w-[4.8rem] border-b border-l border-stone-200 px-1 py-1.5 text-center',
-                            isToday
-                              ? 'bg-emerald-50 text-emerald-950 font-bold'
-                              : isClosedDay
-                                ? 'bg-amber-50/70 text-amber-950'
-                                : 'bg-stone-50 text-stone-800',
-                          )}
-                        >
-                          <div className="flex items-center justify-center gap-1">
-                            <span
-                              className={clsx(
-                                'text-[10px] font-semibold uppercase',
-                                isToday ? 'text-emerald-700' : isClosedDay ? 'text-amber-700' : 'text-stone-500',
-                              )}
-                            >
-                              {weekdayShort(day)}
-                            </span>
-                            {isClosedDay && (
-                              <span className="rounded bg-amber-200 px-1 text-[8px] font-bold text-amber-900">
-                                OFF
-                              </span>
-                            )}
-                          </div>
-
-                          <div
-                            className={clsx(
-                              'text-xs font-bold tabular-nums',
-                              isToday ? 'text-emerald-900' : 'text-stone-900',
-                            )}
-                          >
-                            {Number(day.slice(8, 10))}
-                          </div>
-
-                          <div className="relative mt-0.5 flex items-center justify-center">
-                            {isToday ? (
-                              <span className="rounded-full bg-emerald-700 px-1.5 py-0.2 text-[8px] font-bold text-white">
-                                Today
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setBulkMenuDate(isBulkOpen ? null : day)}
-                                className="rounded p-0.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700"
-                                title={`Bulk fill for ${formatDateShort(day)}`}
-                              >
-                                <ChevronDown className="h-3 w-3" />
-                              </button>
-                            )}
-
-                            {/* Bulk Action Popover */}
-                            {isBulkOpen && (
-                              <div
-                                ref={bulkMenuRef}
-                                className="absolute left-1/2 top-full z-40 mt-1 w-44 -translate-x-1/2 rounded-xl border border-stone-200 bg-white p-1 text-left shadow-lg"
-                              >
-                                <div className="px-2 py-0.5 text-[9px] font-bold uppercase text-stone-400">
-                                  {formatDateShort(day)}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => bulkMutation.mutate({ date: day, status: 'full' })}
-                                  className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
-                                >
-                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
-                                  Mark all Present (P)
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => bulkMutation.mutate({ date: day, status: 'absent' })}
-                                  className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-50"
-                                >
-                                  <span className="h-1.5 w-1.5 rounded-full bg-rose-600" />
-                                  Mark all Absent (A)
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => bulkMutation.mutate({ date: day, status: null })}
-                                  className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-stone-600 hover:bg-stone-100"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                  Clear day
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </th>
-                      )
-                    })}
-
-                  {/* Summary Columns for Step 1 Check Attendance */}
-                  <th className="sticky top-0 z-10 min-w-[5.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Days & OT
-                  </th>
-                  <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                    Owed Now
-                  </th>
-                  {upadConfig.hasAny && (
-                    <th className="sticky top-0 z-10 min-w-[6.5rem] border-b border-l border-stone-200 bg-stone-100 px-2.5 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-stone-600">
-                      {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Bal` : 'Upad Bal'}
-                    </th>
-                  )}
-                  <th className="sticky top-0 z-10 min-w-[7.5rem] border-b border-l border-stone-200 bg-stone-100 px-3 py-2 text-center text-[10px] font-semibold uppercase tracking-wider text-emerald-800">
-                    Action
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-stone-100">
-                {displayRows.map((row) => {
-                  const { employee } = row
-                  const owedNow = row.openingPaise + row.earnedPaise + row.adjustmentPaise
-
-                  return (
-                    <tr
-                      key={employee.id}
-                      className={clsx(
-                        'transition-colors hover:bg-stone-50/80',
-                        !employee.active && 'bg-stone-50/50 opacity-75',
-                      )}
-                    >
-                      {/* Sticky Worker Name Column */}
-                      <td
-                        className={clsx(
-                          'sticky left-0 z-20 border-b border-stone-200 px-3.5 py-2 shadow-[1px_0_0_0_#e2e8f0]',
-                          !employee.active ? 'bg-stone-50' : 'bg-white',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setWorkerModalRow(row)}
-                          className="flex w-full items-center gap-2.5 text-left group cursor-pointer"
-                          title="Click to view worker cycle details & adjustments"
-                        >
-                          <Avatar name={employee.name} size="sm" />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1">
-                              <span className="truncate text-xs font-semibold text-stone-900 group-hover:text-emerald-700">
-                                {employee.name}
-                              </span>
-                              {!employee.active && (
-                                <span className="rounded bg-stone-100 px-1 text-[9px] font-medium text-stone-500">
-                                  Inactive
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Summary details */}
-                            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px]">
-                              <span className="font-medium text-stone-400">
-                                #{employee.employee_no}
-                              </span>
-                              <span className="text-stone-300">·</span>
-                              <span className="font-semibold text-stone-700">
-                                {formatMoney(employee.daily_rate_paise)}/d
-                              </span>
-                              {upadConfig.hasAny && (
-                                <>
-                                  <span className="text-stone-300">·</span>
-                                  <span className={clsx(
-                                    'font-semibold',
-                                    row.upadOutstandingPaise > 0 ? 'text-amber-700' : 'text-stone-400'
-                                  )}>
-                                    {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label}:` : 'Upad:'} {formatMoney(row.upadOutstandingPaise)}
-                                  </span>
-                                </>
-                              )}
-                            </div>
-
-                            {/* Late entries chip (unpaid marks older than grid start) */}
-                            {(() => {
-                              const lateEntries = workerLateEntriesMap.get(employee.id) || []
-                              if (lateEntries.length === 0) return null
-                              return (
-                                <div className="mt-1">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      setLateEntriesTarget({ employee, entries: lateEntries })
-                                    }}
-                                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100 shadow-2xs transition select-none cursor-pointer"
-                                    title={`${lateEntries.length} unpaid late attendance marks from before this cycle`}
-                                  >
-                                    <Clock className="h-2.5 w-2.5 text-amber-600" />
-                                    <span>{lateEntries.length} late {lateEntries.length === 1 ? 'entry' : 'entries'}</span>
-                                  </button>
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        </button>
-                      </td>
-
-                      {/* Attendance Grid Cells */}
-                      {days.map((day) => {
-                          const record = attendanceMap.get(keyFor(employee.id, day))
-                          const rate = getRateForDate(employee, rates, day)
-                          const hasNote = Boolean(record?.note)
-                          const hasOt = record && record.ot_minutes > 0
-                          const isFri = isFriday(day)
-                          const isSettled = Boolean(record?.settled_payout)
-                          const workerPaidUpTo = workerPaidUpToMap.get(employee.id)
-                          const isPriorPaid = !isPastCycle && Boolean(workerPaidUpTo && day <= workerPaidUpTo)
-                          const isCellLocked = isSettled || isPriorPaid || isPastCycle
-                          const isUnmarked = !isCellLocked && !record?.status && day <= today && employee.active && (!employee.joined_on || employee.joined_on <= day)
-
-                          return (
-                            <td
-                              key={day}
-                              className={clsx(
-                                'border-b border-l border-stone-100 p-1 text-center',
-                                isFri && !record && 'bg-amber-50/20',
-                                isPriorPaid && 'bg-stone-50/60',
-                              )}
-                            >
-                              <div className="group relative">
-                                {isCellLocked ? (
-                                  <button
-                                    type="button"
-                                    disabled
-                                    title={
-                                      isPriorPaid
-                                        ? `Paid in prior payout (paid up to ${formatDateShort(workerPaidUpTo!)}). Locked.`
-                                        : isPastCycle
-                                          ? `Closed cycle on ${formatDateShort(day)}. Read-only.`
-                                          : `Settled in payout on ${formatDateShort(day)}. Locked.`
-                                    }
-                                    className={clsx(
-                                      'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold select-none cursor-not-allowed',
-                                      isPriorPaid
-                                        ? 'bg-stone-100/90 text-stone-400 border-stone-200/80 opacity-60'
-                                        : clsx(cellStyle(record?.status), 'opacity-80'),
-                                    )}
-                                  >
-                                    <span className="text-xs font-bold leading-tight flex items-center gap-0.5">
-                                      {formatAttendanceLabel(record)}
-                                      <Lock className="h-2.5 w-2.5 text-stone-400" />
-                                    </span>
-                                    {hasOt && (
-                                      <span className="mt-0.5 inline-flex items-center rounded px-1 py-0.2 text-[9px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/80 tabular-nums leading-none">
-                                        +{formatHours(record.ot_minutes)}
-                                      </span>
-                                    )}
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => cycleCell(employee, day)}
-                                    onContextMenu={(event) => {
-                                      event.preventDefault()
-                                      setEditor({ employeeId: employee.id, date: day })
-                                    }}
-                                    title={`${employee.name} · ${weekdayShort(day)} ${formatDateShort(day)}\nRate: ${formatMoney(rate)}/d\nStatus: ${record ? STATUS_NAME[record.status] : 'Blank (no pay)'}`}
-                                    className={clsx(
-                                      'cell-button relative flex flex-col items-center justify-center h-10 w-full rounded-xl border text-xs font-bold transition-all select-none',
-                                      cellStyle(record?.status),
-                                      isUnmarked && 'border-dashed border-amber-400/90 bg-amber-50/30',
-                                    )}
-                                  >
-                                    <span className="text-xs font-bold leading-tight">
-                                      {formatAttendanceLabel(record)}
-                                    </span>
-
-                                    {/* Clean OT Pill */}
-                                    {hasOt && (
-                                      <span className="mt-0.5 inline-flex items-center rounded px-1 py-0.2 text-[9px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/80 tabular-nums leading-none">
-                                        +{formatHours(record.ot_minutes)}
-                                      </span>
-                                    )}
-
-                                    {/* Note Indicator Dot */}
-                                    {hasNote && (
-                                      <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                    )}
-                                  </button>
-                                )}
-
-                                {/* Hover Pencil Edit Button */}
-                                {!isCellLocked && (
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation()
-                                      setEditor({ employeeId: employee.id, date: day })
-                                    }}
-                                    className="absolute -right-1 -top-1 hidden rounded-full border border-stone-200 bg-white p-1 text-stone-500 shadow-sm hover:text-emerald-700 group-hover:block transition z-10"
-                                    aria-label={`Edit ${employee.name} on ${formatDateShort(day)}`}
-                                  >
-                                    <Pencil className="h-2.5 w-2.5" />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          )
-                        })}
-
-                      {/* Summary Days Column */}
-                      <td className="border-b border-l border-stone-100 px-2 py-2 text-center">
-                        <div className="text-xs font-bold text-stone-900 tabular-nums">
-                          {row.daysWorked} d
-                        </div>
-                        <div className="text-[10px] font-medium text-stone-500 tabular-nums mt-0.5">
-                          {row.otMinutes > 0 ? (
-                            <span className="text-emerald-700 font-semibold">+{formatHours(row.otMinutes)} OT</span>
-                          ) : (
-                            <span>0 hr OT</span>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Owed Now (Salary + Carry + Adjustments) */}
-                      <td className="border-b border-l border-stone-100 px-2.5 py-2 text-right">
-                        <div className="text-xs font-bold text-stone-900 tabular-nums">
-                          {formatMoney(owedNow, { showZero: true })}
-                        </div>
-                        {row.openingPaise > 0 ? (
-                          <div
-                            className="text-[10px] font-semibold text-sky-800 tabular-nums"
-                            title="Unpaid salary carried forward from last cycle"
-                          >
-                            +{formatMoney(row.openingPaise)} Baki
-                          </div>
-                        ) : (
-                          <div className="text-[10px] text-stone-400 tabular-nums">
-                            {formatMoney(row.earnedPaise)} cycle
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Upad Button Column */}
-                      {upadConfig.hasAny && (
-                        <td className="border-b border-l border-stone-100 px-2.5 py-2 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setWorkerUpadTarget(row)}
-                            className={clsx(
-                              'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold transition border select-none tabular-nums',
-                              row.upadOutstandingPaise > 0
-                                ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 shadow-2xs'
-                                : 'border-stone-200 bg-stone-50/80 text-stone-500 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800',
-                            )}
-                            title={`Manage upad for ${employee.name}`}
-                          >
-                            <HandCoins className="h-3 w-3 text-amber-700" />
-                            <span>{row.upadOutstandingPaise > 0 ? formatMoney(row.upadOutstandingPaise) : `+ ${upadConfig.isOnlyOneOn ? upadConfig.singleBucket!.label : 'Upad'}`}</span>
-                          </button>
-                        </td>
-                      )}
-
-                      {/* Pay Worker Action (Navigates to Payout Screen for this worker) */}
-                      <td className="border-b border-l border-stone-100 px-3 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onNavigate(`payout?worker=${employee.id}`)}
-                          className="inline-flex items-center justify-center gap-1 w-full rounded-xl px-2.5 py-1.5 text-xs font-bold transition border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
-                          title={`Open payout screen for ${employee.name}`}
-                        >
-                          <span>Pay Worker</span>
-                          <ArrowRight className="h-3 w-3" />
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-
-              {/* Table Footer Totals */}
-              <tfoot>
-                <tr className="bg-stone-100 font-bold text-stone-900 border-t-2 border-stone-300">
-                  <td className="sticky left-0 z-20 border-t-2 border-stone-300 bg-stone-100 px-3.5 py-2.5 text-xs uppercase tracking-wider text-stone-800 shadow-[1px_0_0_0_#cbd5e1] whitespace-nowrap">
-                    Cycle Total ({rows.length})
-                  </td>
-
-                  {dailyTotals.map((total, index) => (
-                    <td
-                      key={days[index]}
-                      className="border-l border-t-2 border-stone-300 bg-stone-100 px-1 py-1.5 text-center"
-                    >
-                      <div className="text-[10px] font-bold text-stone-800 tabular-nums">
-                        {total.present} P
-                      </div>
-                      <div className="text-[9px] font-semibold text-stone-500 tabular-nums">
-                        {total.ot > 0 ? `+${formatHours(total.ot)}` : '—'}
-                      </div>
-                    </td>
-                  ))}
-
-                  <td className="border-l border-t-2 border-stone-300 bg-stone-100 px-2 py-2 text-center text-xs font-bold text-stone-800 tabular-nums">
-                    <div>{rows.reduce((sum, r) => sum + r.daysWorked, 0)} d</div>
-                    {rows.reduce((sum, r) => sum + r.otMinutes, 0) > 0 && (
-                      <div className="text-[10px] text-emerald-800 font-semibold">
-                        +{formatHours(rows.reduce((sum, r) => sum + r.otMinutes, 0))} OT
-                      </div>
-                    )}
-                  </td>
-
-                  <td className="border-l border-t-2 border-stone-300 bg-stone-100 px-2.5 py-2 text-right text-xs font-bold text-stone-950 tabular-nums">
-                    {formatMoney(totals.opening + totals.earned + totals.adjustment, { showZero: true })}
-                  </td>
-                  <td className="border-l border-t-2 border-stone-300 bg-amber-100 px-2.5 py-2 text-right text-xs font-bold text-amber-900 tabular-nums">
-                    {totals.outstanding > 0 ? formatMoney(totals.outstanding, { showZero: true }) : '—'}
-                  </td>
-                  <td className="border-l border-t-2 border-stone-300 bg-emerald-100 px-3 py-2 text-center">
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('payout')}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900 hover:text-emerald-700"
-                    >
-                      <span>Pay All</span>
-                      <ArrowRight className="h-3 w-3" />
-                    </button>
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </>
-      )}
+          <CycleRegisterTable
+            viewMode={viewMode}
+            onViewModeChange={handleViewModeChange}
+            cycleStart={cycleStart}
+            gridEndDate={gridEndDate}
+            activeEmployees={activeEmployees}
+            allEmployees={employees}
+            statements={statementsQuery.data ?? []}
+            attendance={attendance}
+            upadEntries={payrollData?.upadEntries ?? []}
+            adjustments={payrollData?.adjustments ?? []}
+            rates={rates}
+            periods={payrollData?.periods ?? []}
+            settings={payrollSettings}
+            isPastCycle={isPastCycle}
+            selectedCycleId={selectedCycleId}
+            completedRuns={completedRuns}
+            onSelectCycleId={setSelectedCycleId}
+            onOpenAttendanceEditor={(empId, d) => setEditor({ employeeId: empId, date: d })}
+          />
+        )}
       </Card>
-
-      {/* Legend & Guide footer */}
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-stone-500">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-          <span className="inline-flex items-center gap-1.5 font-semibold">
-            <span className="h-3 w-3 rounded-md border border-emerald-400 bg-emerald-100" />
-            <strong className="text-stone-800">P</strong> = Full day
-          </span>
-          <span className="inline-flex items-center gap-1.5 font-semibold">
-            <span className="h-3 w-3 rounded-md border border-amber-400 bg-amber-100" />
-            <strong className="text-stone-800">H</strong> = Half day
-          </span>
-          <span className="inline-flex items-center gap-1.5 font-semibold">
-            <span className="h-3 w-3 rounded-md border border-rose-400 bg-rose-100" />
-            <strong className="text-stone-800">A</strong> = Absent
-          </span>
-          <span className="inline-flex items-center gap-1.5 font-semibold">
-            <span className="h-3 w-3 rounded-md border border-sky-400 bg-sky-100" />
-            <strong className="text-stone-800">3h</strong> = Hours (1–7h)
-          </span>
-          <span className="inline-flex items-center gap-1.5 font-semibold">
-            <span className="h-3 w-3 rounded-md border border-stone-300 bg-stone-50" />
-            <strong className="text-stone-800">—</strong> = Blank (no pay)
-          </span>
-        </div>
-        <div className="text-[11px] text-stone-400 font-medium">
-          Click cell to cycle · Right-click or pencil for OT & Notes
-        </div>
-      </div>
-
-      {/* Cycle Summary & Settlement Box */}
-      <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-5">
-          {/* Summary Breakdown Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1">
-            {/* 1. Working Days & OT */}
-            <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-stone-600">
-                Work Completed
-              </div>
-              <div className="mt-1 text-lg font-bold text-stone-900 tabular-nums">
-                {rows.reduce((sum, r) => sum + r.daysWorked, 0)} <span className="text-sm font-normal text-stone-500">days</span>
-              </div>
-              <div className="text-xs font-semibold text-teal-700 tabular-nums mt-0.5">
-                {rows.reduce((sum, r) => sum + r.otMinutes, 0) > 0
-                  ? `+${formatHours(rows.reduce((sum, r) => sum + r.otMinutes, 0))} overtime`
-                  : '0 hr overtime'}
-              </div>
-            </div>
-
-            {/* 2. Salary & Last Baki */}
-            <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                Gross Salary
-              </div>
-              <div className="mt-1 text-lg font-bold text-emerald-900 tabular-nums">
-                {formatMoney(totals.earned, { showZero: true })}
-              </div>
-              <div className="text-xs font-medium text-stone-500 tabular-nums mt-0.5">
-                {totals.opening > 0 ? `+${formatMoney(totals.opening)} last baki` : 'No opening baki'}
-              </div>
-            </div>
-
-            {/* 3. Upad Status (Recovered & Remaining) */}
-            {upadConfig.hasAny && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-                <div className="text-xs font-bold uppercase tracking-wider text-amber-900">
-                  {upadConfig.isOnlyOneOn ? `${upadConfig.singleBucket!.label} Status` : 'Upad Status'}
-                </div>
-                <div className="mt-1 text-lg font-bold text-amber-950 tabular-nums">
-                  {formatMoney(totals.outstanding, { showZero: true })}
-                </div>
-                <div className="text-xs font-semibold text-rose-700 tabular-nums mt-0.5">
-                  {totals.recovery > 0 ? (
-                    <span>-{formatMoney(totals.recovery)} being recovered</span>
-                  ) : (
-                    <span className="text-stone-500 font-normal">₹0 recovered · {formatMoney(totals.outstanding)} remain</span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 4. Adjustments / Carried Balance */}
-            <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-stone-600">
-                Net Deductions & Carry
-              </div>
-              <div className="mt-1 text-lg font-bold text-stone-900 tabular-nums">
-                {signedMoney(totals.adjustment)}
-              </div>
-              <div className="text-xs font-medium text-stone-500 tabular-nums mt-0.5">
-                {totals.closing > 0 ? (
-                  <span className="text-amber-700 font-semibold">{formatMoney(totals.closing)} carry forward</span>
-                ) : (
-                  <span className="text-emerald-700 font-medium">Fully settled</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Net Payable & Save Payout Action */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 lg:border-l lg:border-stone-200 lg:pl-6 shrink-0">
-            <div className="text-left sm:text-right">
-              <div className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                Total Payable Amount
-              </div>
-              <div className="text-2xl sm:text-3xl font-extrabold text-emerald-800 tabular-nums tracking-tight">
-                {formatMoney(totals.due, { showZero: true })}
-              </div>
-              <div className="text-xs font-medium text-stone-600 tabular-nums mt-0.5">
-                Paying: <span className="font-bold text-stone-900">{formatMoney(totals.paid)}</span>
-                {totals.closing > 0 && (
-                  <span className="text-amber-700 font-semibold ml-1.5">
-                    ({formatMoney(totals.closing)} remain)
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <Button
-              variant="emerald"
-              size="lg"
-              onClick={() => onNavigate('payout')}
-              className="h-12 px-6 text-sm font-bold shadow-sm"
-            >
-              <Wallet className="h-4 w-4" />
-              <span>Issue Payout</span>
-            </Button>
-          </div>
-        </div>
-      </div>
 
       {/* Attendance Editor Modal */}
       {editor && editorEmployee && (

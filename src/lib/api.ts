@@ -5,11 +5,13 @@ import type {
   AppSetting,
   Attendance,
   AttendanceStatus,
+  CycleDraft,
   Employee,
   EmploymentPeriod,
   PayoutRun,
   RateHistory,
   SalaryPayment,
+  SalaryWriteoff,
   SettingsMap,
   Statement,
   UpadCategory,
@@ -611,4 +613,54 @@ export async function deletePayout(runId: string): Promise<void> {
 export function settingsNumber(settings: SettingsMap, key: string, fallback: number): number {
   const value = Number.parseFloat(settingValue(settings, key))
   return Number.isFinite(value) ? value : fallback
+}
+
+export async function listCycleDrafts(cycleStart: string): Promise<CycleDraft[]> {
+  try {
+    return await pb.collection(COLLECTIONS.drafts).getFullList<CycleDraft>({
+      filter: `cycle_start = "${cycleStart}"`,
+    })
+  } catch {
+    return []
+  }
+}
+
+export async function saveCycleDraft(input: {
+  employee: string
+  cycle_start: string
+  deduct_paise?: number
+  give_upad_paise?: number
+  paid_paise?: number | null
+  paid_date?: string
+  work_counted_up_to?: string
+  is_done?: boolean
+  created_upad_ids?: string
+  note?: string
+}): Promise<CycleDraft> {
+  const existing = await pb
+    .collection(COLLECTIONS.drafts)
+    .getFirstListItem<CycleDraft>(`employee = "${input.employee}" && cycle_start = "${input.cycle_start}"`)
+    .catch(() => null)
+
+  if (existing) {
+    return await pb.collection(COLLECTIONS.drafts).update<CycleDraft>(existing.id, input)
+  }
+  return await pb.collection(COLLECTIONS.drafts).create<CycleDraft>(input)
+}
+
+export async function deleteCycleDraft(id: string): Promise<void> {
+  await pb.collection(COLLECTIONS.drafts).delete(id).catch(() => {})
+}
+
+export async function createSalaryWriteoff(input: {
+  worker: string
+  payout?: string
+  date: string
+  amount_paise: number
+  note: string
+}): Promise<SalaryWriteoff> {
+  return await pb.collection(COLLECTIONS.writeoffs).create<SalaryWriteoff>({
+    ...input,
+    voided: false,
+  })
 }

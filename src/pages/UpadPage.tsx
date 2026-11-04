@@ -155,9 +155,9 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-500">
             <Coins className="h-7 w-7 text-stone-400" />
           </div>
-          <h2 className="mt-4 text-base font-extrabold text-stone-900">Upad is turned off in Settings</h2>
+          <h2 className="mt-4 text-base font-extrabold text-stone-900">Upad is configured in Settings</h2>
           <p className="mt-2 text-xs text-stone-500 leading-relaxed">
-            Cash advances and upad deductions are currently turned off. You can re-enable Chalu Upad or Main Upad at any time in Settings.
+            Cash advances and upad deductions can be configured in Settings.
           </p>
           <div className="mt-6 flex justify-center">
             <Button onClick={() => onNavigate('settings')}>
@@ -384,7 +384,7 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                 <tr>
                   <th className="px-4 py-2.5">Date</th>
                   <th className="px-4 py-2.5">Employee</th>
-                  <th className="px-4 py-2.5">Type & Bucket</th>
+                  <th className="px-4 py-2.5">Type</th>
                   <th className="px-4 py-2.5 text-right">Amount</th>
                   <th className="px-4 py-2.5 text-right">Running Bal</th>
                   <th className="px-4 py-2.5">Note</th>
@@ -434,11 +434,6 @@ export default function UpadPage({ onNavigate }: { onNavigate: (path: string) =>
                           >
                             {KIND_LABEL[entry.kind]}
                           </Badge>
-                          <span className="rounded-md bg-stone-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-stone-700">
-                            {upadConfig.isBothOn
-                              ? (entry.category === 'extra' || entry.category === 'moto' ? upadConfig.motoLabel : upadConfig.chaluLabel)
-                              : (upadConfig.singleBucket?.label || 'Upad')}
-                          </span>
                         </div>
                       </td>
                       <td

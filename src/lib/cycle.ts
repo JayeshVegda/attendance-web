@@ -8,12 +8,18 @@ export const DEFAULT_SETTINGS: SettingsMap = {
   ot_divisor: '8',
   business_name: 'હાજરી પગાર',
   expected_payout_weekday: '4',
-  chalu_upad_enabled: 'true',
-  moto_upad_enabled: 'true',
-  chalu_upad_label: 'Chalu Upad',
-  moto_upad_label: 'Main Upad',
   hours_attendance_enabled: 'true',
   hour_step_minutes: '30',
+}
+
+export function computeNextCycleStartFromPaidDates(
+  paidDates: string[],
+  fallbackCycleStart: string
+): string {
+  const validDates = paidDates.map((d) => d.slice(0, 10)).filter(Boolean)
+  if (!validDates.length) return fallbackCycleStart
+  const latestPaid = validDates.reduce((max, cur) => (cur > max ? cur : max))
+  return addDays(latestPaid, 1)
 }
 
 export function settingValue(settings: SettingsMap, key: string): string {
@@ -77,86 +83,39 @@ export type UpadBucketsConfig = {
 }
 
 export function getUpadBuckets(settings?: SettingsMap): UpadBucketsConfig {
-  const isChaluOn = isChaluUpadEnabled(settings)
-  const isMotoOn = isMotoUpadEnabled(settings)
-  const chaluLabel = (settingValue(settings ?? {}, 'chalu_upad_label') || 'Chalu Upad').trim()
-  const motoLabel = (settingValue(settings ?? {}, 'moto_upad_label') || 'Main Upad').trim()
-
-  const count = (isChaluOn ? 1 : 0) + (isMotoOn ? 1 : 0)
-  const isBothOn = count === 2
-  const isOnlyOneOn = count === 1
-  const isBothOff = count === 0
-
-  const buckets: UpadBucket[] = []
-
-  let chaluBucket: UpadBucket | undefined
-  let motoBucket: UpadBucket | undefined
-
-  if (isChaluOn) {
-    chaluBucket = {
-      id: 'chalu',
-      key: 'chalu',
-      label: chaluLabel,
-      shortLabel: isBothOn ? 'Chalu' : '',
-      cutLabel: isBothOn ? `${chaluLabel} cut` : `${chaluLabel} cut`,
-      newLabel: isBothOn ? `New ${chaluLabel}` : `New ${chaluLabel}`,
-      balLabel: isBothOn ? `${chaluLabel} Bal` : 'Upad Bal',
-      chipSymbol: isBothOn ? 'C' : '',
-      color: 'amber',
-    }
-    buckets.push(chaluBucket)
+  const singleBucket: UpadBucket = {
+    id: 'chalu' as UpadBucketId,
+    key: 'chalu' as UpadBucketId,
+    label: 'Upad',
+    shortLabel: '',
+    cutLabel: 'Deduct Upad',
+    newLabel: 'Give Upad',
+    balLabel: 'Upad Bal',
+    chipSymbol: '',
+    color: 'amber',
   }
-
-  if (isMotoOn) {
-    motoBucket = {
-      id: 'moto',
-      key: 'moto',
-      label: motoLabel,
-      shortLabel: isBothOn ? 'Main' : '',
-      cutLabel: isBothOn ? `${motoLabel} cut` : `${motoLabel} cut`,
-      newLabel: isBothOn ? `New ${motoLabel}` : `New ${motoLabel}`,
-      balLabel: isBothOn ? `${motoLabel} Bal` : 'Upad Bal',
-      chipSymbol: isBothOn ? 'M' : '',
-      color: 'purple',
-    }
-    buckets.push(motoBucket)
-  }
-
-  const singleBucket = isOnlyOneOn ? buckets[0] : undefined
 
   return {
-    enabled: buckets,
-    count,
-    hasAny: count > 0,
-    isBothOn,
-    isOnlyOneOn,
-    isBothOff,
-    isChaluOn,
-    isMotoOn,
-    chaluLabel,
-    motoLabel,
+    enabled: [singleBucket],
+    count: 1,
+    hasAny: true,
+    isBothOn: false,
+    isOnlyOneOn: true,
+    isBothOff: false,
+    isChaluOn: true,
+    isMotoOn: false,
+    chaluLabel: 'Upad',
+    motoLabel: 'Upad',
     singleBucket,
-    chaluBucket,
-    motoBucket,
+    chaluBucket: singleBucket,
+    motoBucket: undefined,
     sectionTitle: 'Upad Deductions',
-    activeBalance: (chaluPaise: number, motoPaise: number) => {
-      if (isBothOff) return 0
-      if (isBothOn) return chaluPaise + motoPaise
-      return isChaluOn ? chaluPaise : motoPaise
-    },
+    activeBalance: (chaluPaise: number, motoPaise: number) => (chaluPaise || 0) + (motoPaise || 0),
     formatRemainingFooter: (chaluLeftPaise: number, motoLeftPaise: number) => {
-      if (isBothOff) return null
-      if (isBothOn) {
-        const total = chaluLeftPaise + motoLeftPaise
-        return {
-          totalPaise: total,
-          text: `Total Upad Remaining: ${formatMoney(total)} (${chaluLabel}: ${formatMoney(chaluLeftPaise)}, ${motoLabel}: ${formatMoney(motoLeftPaise)})`,
-        }
-      }
-      const activeLeft = isChaluOn ? chaluLeftPaise : motoLeftPaise
+      const total = (chaluLeftPaise || 0) + (motoLeftPaise || 0)
       return {
-        totalPaise: activeLeft,
-        text: `Upad Remaining: ${formatMoney(activeLeft)}`,
+        totalPaise: total,
+        text: `Total Upad Remaining: ${formatMoney(total)}`,
       }
     },
   }

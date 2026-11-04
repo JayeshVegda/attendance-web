@@ -237,7 +237,7 @@ export default function ReportsPage({
           />
         </Card>
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[22rem_1fr]">
+        <div className="grid gap-5 xl:grid-cols-[22rem_minmax(0,1fr)] min-w-0">
           {/* Left: Payouts List & Monthly Summaries */}
           <div className="space-y-4 no-print">
             <Card className="overflow-hidden">
@@ -329,7 +329,7 @@ export default function ReportsPage({
 
           {/* Right: Selected Run Statement & Printable Slip */}
           {selectedRun && (
-            <Card className="print-area overflow-hidden shadow-md">
+            <Card className="print-area overflow-hidden shadow-md min-w-0">
               {/* Statement Header */}
               <div className="flex flex-col gap-4 border-b border-stone-200 px-6 py-5 sm:flex-row sm:items-start sm:justify-between bg-stone-50/40">
                 <div>

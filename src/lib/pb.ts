@@ -18,5 +18,7 @@ export const COLLECTIONS = {
   statements: 'statements',
   payments: 'salary_payments',
   settings: 'settings',
+  drafts: 'cycle_drafts',
+  writeoffs: 'salary_writeoffs',
   audit: 'audit_log',
 } as const

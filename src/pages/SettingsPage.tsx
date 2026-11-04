@@ -20,13 +20,9 @@ import {
   listEmployees,
   listRuns,
   saveSetting,
-  BucketOutstandingBalanceError,
-  type WorkerBalanceDetail,
 } from '../lib/api'
 import {
   DEFAULT_SETTINGS,
-  isChaluUpadEnabled,
-  isMotoUpadEnabled,
   isHoursAttendanceEnabled,
   isRealPayoutRun,
   hourStepMinutes as getHourStepMinutes,
@@ -45,7 +41,6 @@ import {
   Select,
   Spinner,
 } from '../components/ui'
-import { SettleModal, type SettleTarget } from '../components/SettleModal'
 
 const WEEKDAYS = [
   { value: '0', label: 'Sunday' },
@@ -77,17 +72,10 @@ export default function SettingsPage() {
   const [language, setLangState] = useState<LanguageMode>(() => getLanguage())
   const [copied, setCopied] = useState(false)
 
-  // Feature 1 & 2 settings
-  const [chaluUpadEnabled, setChaluUpadEnabled] = useState(true)
-  const [motoUpadEnabled, setMotoUpadEnabled] = useState(true)
-  const [chaluUpadLabel, setChaluUpadLabel] = useState('Chalu Upad')
-  const [motoUpadLabel, setMotoUpadLabel] = useState('Main Upad')
+  // Upad & Attendance settings
+  const [upadLabel, setUpadLabel] = useState('Upad')
   const [hoursAttendanceEnabled, setHoursAttendanceEnabled] = useState(true)
   const [hourStep, setHourStep] = useState('30')
-
-  // Safety & Settle
-  const [blockedBucketError, setBlockedBucketError] = useState<BucketOutstandingBalanceError | null>(null)
-  const [settleTarget, setSettleTarget] = useState<SettleTarget | null>(null)
 
   useEffect(() => {
     if (!settingsQuery.data) return
@@ -96,24 +84,16 @@ export default function SettingsPage() {
     setFirstCycleStart(s.first_cycle_start ?? DEFAULT_SETTINGS.first_cycle_start)
     setOtDivisor(s.ot_divisor ?? DEFAULT_SETTINGS.ot_divisor)
     setPayoutWeekday(s.expected_payout_weekday ?? DEFAULT_SETTINGS.expected_payout_weekday)
-    setChaluUpadEnabled(isChaluUpadEnabled(s))
-    setMotoUpadEnabled(isMotoUpadEnabled(s))
-    setChaluUpadLabel(s.chalu_upad_label ?? DEFAULT_SETTINGS.chalu_upad_label)
-    setMotoUpadLabel(s.moto_upad_label ?? DEFAULT_SETTINGS.moto_upad_label)
+    setUpadLabel(s.upad_label ?? 'Upad')
     setHoursAttendanceEnabled(isHoursAttendanceEnabled(s))
     setHourStep(String(getHourStepMinutes(s)))
   }, [settingsQuery.data])
 
   const mutation = useMutation({
     mutationFn: async () => {
-      setBlockedBucketError(null)
       setLanguage(language)
 
-      // Service layer safety validation on saving bucket toggles
-      await saveSetting('chalu_upad_enabled', String(chaluUpadEnabled))
-      await saveSetting('moto_upad_enabled', String(motoUpadEnabled))
-      await saveSetting('chalu_upad_label', chaluUpadLabel.trim() || 'Chalu Upad')
-      await saveSetting('moto_upad_label', motoUpadLabel.trim() || 'Main Upad')
+      await saveSetting('upad_label', upadLabel.trim() || 'Upad')
       await saveSetting('hours_attendance_enabled', String(hoursAttendanceEnabled))
       await saveSetting('hour_step_minutes', hourStep)
 
@@ -130,12 +110,7 @@ export default function SettingsPage() {
       toast('Settings saved successfully')
     },
     onError: (error) => {
-      if (error instanceof BucketOutstandingBalanceError) {
-        setBlockedBucketError(error)
-        toast(error.message, 'error')
-      } else {
-        toast(error instanceof Error ? error.message : 'Could not save settings', 'error')
-      }
+      toast(error instanceof Error ? error.message : 'Could not save settings', 'error')
     },
   })
 
@@ -171,91 +146,10 @@ export default function SettingsPage() {
         }
       />
 
-      {/* Safety Settle Modal for blocked bucket switches */}
-      <SettleModal target={settleTarget} onClose={() => setSettleTarget(null)} />
-
       <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
         {/* Left column: Business configuration & Guide */}
         <div className="space-y-5">
-          {/* Outstanding Balance Blocker Alert */}
-          {blockedBucketError && (
-            <div className="rounded-2xl border-2 border-rose-300 bg-rose-50/90 p-4 space-y-3.5 shadow-xs animate-in fade-in">
-              <div className="flex items-start gap-3">
-                <div className="h-9 w-9 rounded-xl bg-rose-200 text-rose-800 flex items-center justify-center shrink-0">
-                  <AlertCircle className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="text-sm font-black text-rose-950">
-                    Cannot Turn Off {blockedBucketError.bucket === 'chalu' ? 'Chalu Upad' : 'Main Upad'}
-                  </div>
-                  <div className="text-xs text-rose-800 mt-1 leading-relaxed">
-                    {blockedBucketError.workers.length} worker(s) have an outstanding balance totaling{' '}
-                    <strong className="font-black text-rose-950">
-                      {formatMoney(blockedBucketError.totalPaise)}
-                    </strong>
-                    . Per accounting safety rules, you cannot disable this bucket while money is still owed.
-                  </div>
-                </div>
-              </div>
-
-              {/* Worker List */}
-              <div className="max-h-48 overflow-y-auto rounded-xl border border-rose-200 bg-white divide-y divide-rose-100 shadow-2xs">
-                {blockedBucketError.workers.map((w) => (
-                  <div key={w.id} className="flex items-center justify-between p-2.5 text-xs">
-                    <div>
-                      <span className="font-bold text-stone-900">{w.name}</span>{' '}
-                      <span className="text-stone-400">#{w.employee_no}</span>
-                      {!w.active && (
-                        <span className="ml-1 text-[10px] text-stone-400 uppercase font-semibold">
-                          (Inactive)
-                        </span>
-                      )}
-                    </div>
-                    <span className="font-black text-amber-700">{formatMoney(w.balance_paise)}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-1">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    if (blockedBucketError.bucket === 'chalu') setChaluUpadEnabled(true)
-                    else setMotoUpadEnabled(true)
-                    setBlockedBucketError(null)
-                  }}
-                >
-                  Keep Enabled
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    setSettleTarget({
-                      mode: 'bulk',
-                      bucket: blockedBucketError.bucket,
-                      workers: blockedBucketError.workers,
-                      onSuccessAll: async () => {
-                        if (blockedBucketError.bucket === 'chalu') {
-                          setChaluUpadEnabled(false)
-                          await saveSetting('chalu_upad_enabled', 'false').catch(() => {})
-                        } else {
-                          setMotoUpadEnabled(false)
-                          await saveSetting('moto_upad_enabled', 'false').catch(() => {})
-                        }
-                        setBlockedBucketError(null)
-                        queryClient.invalidateQueries({ queryKey: ['settings'] })
-                      },
-                    })
-                  }
-                >
-                  Settle these first ({blockedBucketError.workers.length})
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Upad Feature Toggles Card */}
+          {/* Upad Settings Card */}
           <Card className="p-5">
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-700 ring-1 ring-amber-600/15">
@@ -266,93 +160,26 @@ export default function SettingsPage() {
                   Advance & Upad Settings
                 </div>
                 <div className="text-xs text-stone-500">
-                  Control which advance buckets are active and customize their display labels.
+                  Worker advance tracking and display preferences.
                 </div>
               </div>
             </div>
 
-            <div className="divide-y divide-stone-100">
-              {/* Chalu Upad Toggle & Name */}
-              <div className="py-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="pr-4">
-                    <div className="text-xs font-bold text-stone-900">
-                      Chalu Upad (ચાલુ ઉપાડ - Weekly Current Advance)
-                    </div>
-                    <div className="text-[11px] text-stone-500 mt-0.5">
-                      Short-term advance taken during the weekly cycle, settled in the regular payout.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setChaluUpadEnabled(!chaluUpadEnabled)}
-                    className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
-                    title={chaluUpadEnabled ? 'Enabled. Click to disable' : 'Disabled. Click to enable'}
-                  >
-                    {chaluUpadEnabled ? (
-                      <ToggleRight className="h-8 w-8 text-emerald-600" />
-                    ) : (
-                      <ToggleLeft className="h-8 w-8 text-stone-300" />
-                    )}
-                  </button>
-                </div>
-                {chaluUpadEnabled && (
-                  <div className="pt-1 max-w-xs">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">
-                      Display Label (Custom Name)
-                    </label>
-                    <Input
-                      value={chaluUpadLabel}
-                      onChange={(e) => setChaluUpadLabel(e.target.value)}
-                      placeholder="Chalu Upad"
-                      className="text-xs font-medium"
-                    />
-                  </div>
-                )}
+            <div className="py-2 space-y-3">
+              <div className="max-w-xs">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">
+                  Display Label (Custom Name)
+                </label>
+                <Input
+                  value={upadLabel}
+                  onChange={(e) => setUpadLabel(e.target.value)}
+                  placeholder="Upad"
+                  className="text-xs font-medium"
+                />
               </div>
-
-              {/* Main Upad Toggle & Name */}
-              <div className="py-3.5 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="pr-4">
-                    <div className="text-xs font-bold text-stone-900">
-                      Main Upad (મોટો ઉપાડ - Long-term Upad Account)
-                    </div>
-                    <div className="text-[11px] text-stone-500 mt-0.5">
-                      Long-term advance tracked across cycles, recovered in fixed deductions.
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMotoUpadEnabled(!motoUpadEnabled)}
-                    className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
-                    title={motoUpadEnabled ? 'Enabled. Click to disable' : 'Disabled. Click to enable'}
-                  >
-                    {motoUpadEnabled ? (
-                      <ToggleRight className="h-8 w-8 text-emerald-600" />
-                    ) : (
-                      <ToggleLeft className="h-8 w-8 text-stone-300" />
-                    )}
-                  </button>
-                </div>
-                {motoUpadEnabled && (
-                  <div className="pt-1 max-w-xs">
-                    <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">
-                      Display Label (Custom Name)
-                    </label>
-                    <Input
-                      value={motoUpadLabel}
-                      onChange={(e) => setMotoUpadLabel(e.target.value)}
-                      placeholder="Main Upad"
-                      className="text-xs font-medium"
-                    />
-                  </div>
-                )}
+              <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3 text-[11px] leading-relaxed text-stone-600">
+                <strong className="text-stone-800">Single Upad Ledger:</strong> Workers have one unified Upad balance. Advances, deductions, cash returns, and write-offs are recorded directly into each worker's dated history.
               </div>
-            </div>
-
-            <div className="mt-3 rounded-2xl border border-stone-200 bg-stone-50 p-3 text-[11px] leading-relaxed text-stone-600">
-              <strong className="text-stone-800">No-Trace Rule:</strong> When only one bucket is enabled, the UI simplifies to a single upad without separate Chalu/Main labels. When both are OFF, advance tracking is completely hidden. Turning OFF is only allowed when all worker balances in that bucket are zero.
             </div>
           </Card>
 
