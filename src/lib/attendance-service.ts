@@ -49,7 +49,7 @@ export async function saveSettings(values: Partial<Omit<Settings, 'id'>>): Promi
 
 export async function loadAppData(): Promise<AppData> {
   const [employees, attendance, upad, drafts, runs, statements, payments, holidays, settings] = await Promise.all([
-    pb.collection(COLLECTIONS.employees).getFullList<Employee>({ sort: 'name' }),
+    pb.collection(COLLECTIONS.employees).getFullList<Employee>({ sort: 'id' }),
     pb.collection(COLLECTIONS.attendance).getFullList<Attendance>({ sort: 'date,employee' }),
     pb.collection(COLLECTIONS.upad).getFullList<UpadEntry>({ filter: 'voided = false', sort: '-date' }),
     pb.collection(COLLECTIONS.drafts).getFullList<CycleDraft>(),
