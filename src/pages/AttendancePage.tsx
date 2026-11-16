@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Calendar,
   CalendarCheck,
   CalendarDays,
   Check,
@@ -40,11 +41,13 @@ import {
   saveAttendance,
   saveDraft,
   savePayoutBatch,
+  setOpenCycleStartDate,
   toggleHoliday,
   unlockPayout,
 } from '../lib/attendance-service'
 import type { AppData, Attendance, AttendanceStatus, CycleDraft, Employee } from '../lib/types'
 import { Avatar, Badge, Button, Card, Field, Input, Modal, Select, Tabs, Textarea } from '../components/ui'
+import { useToast } from '../components/Toast'
 
 type Tab = 'today' | 'cycle'
 type DraftInput = Pick<CycleDraft, 'adj_paise' | 'adj_note' | 'deduct_paise' | 'give_upad_paise' | 'typed_paise' | 'is_done'>
@@ -95,6 +98,7 @@ function readDrawerCash(day: string): string {
 
 export default function AttendancePage() {
   useLanguage()
+  const toast = useToast()
   const today = todayKey()
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window !== 'undefined') {
@@ -105,6 +109,9 @@ export default function AttendancePage() {
   })
   const [rollDate, setRollDate] = useState(today)
   const [cycleChoice, setCycleChoice] = useState('open')
+  const [changeStartModalOpen, setChangeStartModalOpen] = useState(false)
+  const [newStartDateInput, setNewStartDateInput] = useState('')
+  const [applyToWorkersInput, setApplyToWorkersInput] = useState(true)
   const [search, setSearch] = useState('')
   const [drawerCashInput, setDrawerCashInput] = useState(() => readDrawerCash(today))
   const [collapsed, setCollapsed] = useState(false)
@@ -260,12 +267,28 @@ export default function AttendancePage() {
     },
   })
 
+  const changeStartDateMutation = useMutation({
+    mutationFn: () => setOpenCycleStartDate(newStartDateInput, applyToWorkersInput),
+    onSuccess: (result) => {
+      setChangeStartModalOpen(false)
+      toast(
+        `${tx('Cycle start date updated to')} ${formatDateShort(result.startDate)} (${result.updatedCount} ${tx('workers updated')})`,
+        'success',
+      )
+      void refresh()
+    },
+    onError: (err: any) => {
+      toast(err?.message || tx('Failed to update cycle start date'), 'error')
+    },
+  })
+
   const employees = data?.employees ?? []
   const activeEmployees = employees.filter((e) => e.status === 'active')
   const attendanceByDay = useMemo(() => dayMap(data?.attendance ?? []), [data?.attendance])
   const draftByWorker = useMemo(() => new Map((data?.drafts ?? []).map((d) => [d.employee, d])), [data?.drafts])
 
   const selectedRun = cycleChoice === 'open' ? undefined : data?.runs.find((r) => r.id === cycleChoice)
+  const latestRunDate = data?.runs && data.runs.length > 0 ? dateKey(data.runs[0].run_date) : null
   const selectedStatements = (data?.statements ?? []).filter((s) => s.payout_run === selectedRun?.id)
 
   const openStarts = activeEmployees.map(rowBoundary).filter(Boolean)
@@ -868,6 +891,21 @@ export default function AttendancePage() {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
               </div>
+
+              {!selectedRun && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewStartDateInput(cycleStart)
+                    setChangeStartModalOpen(true)
+                  }}
+                  className="inline-flex h-8.5 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-700 shadow-2xs outline-none transition hover:border-emerald-600 hover:bg-emerald-50/40 hover:text-emerald-800 cursor-pointer"
+                  title={tx('Change starting date of current open cycle')}
+                >
+                  <Calendar className="h-3.5 w-3.5 text-emerald-700" />
+                  <span>{tx('Change Start Date')}</span>
+                </button>
+              )}
 
               {!selectedRun && (
                 <label className="flex h-8 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 text-[11px] font-medium text-stone-500">
@@ -1776,6 +1814,103 @@ export default function AttendancePage() {
                 {unlockMutation.error.message}
               </div>
             )}
+          </div>
+        </Modal>
+      )}
+
+      {/* Change Open Cycle Start Date Modal */}
+      {changeStartModalOpen && (
+        <Modal
+          open
+          onClose={() => setChangeStartModalOpen(false)}
+          title={tx('Change Open Cycle Start Date')}
+          description={tx('Adjust the starting date of the current open cycle backwards or forwards.')}
+          size="sm"
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={changeStartDateMutation.isPending}
+                onClick={() => setChangeStartModalOpen(false)}
+              >
+                {tx('Cancel')}
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={changeStartDateMutation.isPending}
+                disabled={
+                  !newStartDateInput ||
+                  newStartDateInput > today ||
+                  Boolean(latestRunDate && newStartDateInput <= latestRunDate) ||
+                  newStartDateInput === cycleStart
+                }
+                onClick={() => changeStartDateMutation.mutate()}
+              >
+                {tx('Update Start Date')}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-3 space-y-1.5">
+              <div className="text-[11px] font-semibold text-stone-500">{tx('Current Cycle Span')}</div>
+              <div className="font-mono text-xs font-bold text-stone-800">
+                {formatDateRange(cycleStart, today)}
+              </div>
+            </div>
+
+            <Field
+              label={tx('New Start Date')}
+              hint={tx('Cannot be in the future or before any closed cycle')}
+            >
+              <Input
+                type="date"
+                autoFocus
+                max={today}
+                min={latestRunDate ? addDays(latestRunDate, 1) : undefined}
+                value={newStartDateInput}
+                onChange={(e) => setNewStartDateInput(e.target.value)}
+                className="font-mono text-xs font-semibold"
+              />
+            </Field>
+
+            {newStartDateInput && newStartDateInput !== cycleStart && (
+              <div className="rounded-lg bg-emerald-50/80 p-2.5 text-xs text-emerald-900 border border-emerald-200">
+                <span className="font-bold">{tx('New Span Preview')}:</span>{' '}
+                <span className="font-mono font-semibold">{formatDateRange(newStartDateInput, today)}</span>
+              </div>
+            )}
+
+            {latestRunDate && newStartDateInput && newStartDateInput <= latestRunDate && (
+              <div role="alert" className="rounded-lg bg-rose-50 p-2.5 text-xs font-bold text-rose-800 ring-1 ring-rose-200">
+                {tx('Cannot start on or before the last closed cycle')} ({formatDateShort(latestRunDate)}).
+              </div>
+            )}
+
+            {newStartDateInput && newStartDateInput > today && (
+              <div role="alert" className="rounded-lg bg-rose-50 p-2.5 text-xs font-bold text-rose-800 ring-1 ring-rose-200">
+                {tx('Cycle start date cannot be in the future.')}
+              </div>
+            )}
+
+            <label className="flex items-start gap-2.5 rounded-lg border border-stone-200 bg-stone-50/40 p-2.5 cursor-pointer hover:bg-stone-50 transition">
+              <input
+                type="checkbox"
+                checked={applyToWorkersInput}
+                onChange={(e) => setApplyToWorkersInput(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-stone-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+              />
+              <div className="text-xs">
+                <div className="font-bold text-stone-800">
+                  {tx('Apply to active unsettled workers')}
+                </div>
+                <div className="text-[11px] text-stone-500 mt-0.5">
+                  {tx('Updates joined date for all unsettled workers so earlier days become editable in the register and count in salary.')}
+                </div>
+              </div>
+            </label>
           </div>
         </Modal>
       )}

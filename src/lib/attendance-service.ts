@@ -566,3 +566,53 @@ export async function deleteEmployee(id: string): Promise<void> {
   }
   await pb.collection(COLLECTIONS.employees).delete(id)
 }
+
+export async function setOpenCycleStartDate(
+  newStartDate: string,
+  applyToWorkers: boolean = true,
+): Promise<{ updatedCount: number; startDate: string }> {
+  const cleanDate = dateKey(newStartDate)
+  const today = todayKey()
+
+  if (!cleanDate || isNaN(new Date(`${cleanDate}T12:00:00`).getTime())) {
+    throw new Error('Please enter a valid start date.')
+  }
+
+  if (cleanDate > today) {
+    throw new Error('Cycle start date cannot be in the future.')
+  }
+
+  // Verify against the latest completed payout run
+  const runs = await pb.collection(COLLECTIONS.runs).getFullList<PayoutRun>({
+    filter: 'voided = false && status = "completed"',
+    sort: '-run_date',
+  })
+  const latestRun = runs[0]
+  if (latestRun) {
+    const latestPayoutDate = dateKey(latestRun.run_date)
+    if (cleanDate <= latestPayoutDate) {
+      throw new Error(
+        `Cannot start cycle on or before the last completed payout (${latestPayoutDate}). Unlock that payout run first.`,
+      )
+    }
+  }
+
+  let updatedCount = 0
+  if (applyToWorkers) {
+    const activeWorkers = await pb.collection(COLLECTIONS.employees).getFullList<Employee>({
+      filter: 'status = "active"',
+    })
+    for (const worker of activeWorkers) {
+      // If the worker has never had a payout (paid_up_to is empty or null)
+      if (!worker.paid_up_to) {
+        await pb.collection(COLLECTIONS.employees).update(worker.id, {
+          joined_on: `${cleanDate} 00:00:00.000Z`,
+        })
+        updatedCount += 1
+      }
+    }
+  }
+
+  return { updatedCount, startDate: cleanDate }
+}
+
