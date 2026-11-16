@@ -44,6 +44,20 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function useToast() {
   const context = useContext(ToastContext)
-  if (!context) throw new Error('useToast must be used inside ToastProvider')
+  if (!context) {
+    return (message: string, type: ToastType = 'success') => {
+      try {
+        if (type === 'error') {
+          sonnerToast.error(message, { duration: 4000 })
+        } else if (type === 'info') {
+          sonnerToast.info(message, { duration: 3500 })
+        } else {
+          sonnerToast.success(message, { duration: 3200 })
+        }
+      } catch {
+        console.log(`[Toast ${type}]: ${message}`)
+      }
+    }
+  }
   return context.toast
 }
