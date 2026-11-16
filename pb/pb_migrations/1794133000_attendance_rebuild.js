@@ -1,19 +1,19 @@
 function dropAttendanceCollections(app) {
   for (const name of [
     'cycle_audits',
-    'settings',
-    'holidays',
+    'salary_writeoffs',
+    'adjustments',
     'salary_payments',
     'statements',
     'cycle_drafts',
     'upad_entries',
     'attendance',
     'payout_runs',
-    'adjustments',
     'audit_log',
-    'salary_writeoffs',
     'employment_periods',
     'rate_history',
+    'settings',
+    'holidays',
     'users',
     'employees',
   ]) {
