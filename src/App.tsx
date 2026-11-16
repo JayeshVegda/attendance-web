@@ -1,77 +1,50 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { AppShell, type View } from './components/AppShell'
-import { ToastProvider } from './components/Toast'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import AttendancePage from './pages/AttendancePage'
-import EmployeesPage from './pages/EmployeesPage'
-import EmployeeDetailPage from './pages/EmployeeDetailPage'
-import UpadPage from './pages/UpadPage'
-import ReportsPage from './pages/ReportsPage'
-import SettingsPage from './pages/SettingsPage'
 
-type Route = { view: View; id?: string }
+const AttendancePage = lazy(() => import('./pages/AttendancePage'))
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage'))
+const UpadPage = lazy(() => import('./pages/UpadPage'))
+const ReportsPage = lazy(() => import('./pages/ReportsPage'))
+const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 
 const VIEWS: View[] = ['attendance', 'employees', 'upad', 'reports', 'settings']
-
-function parseHash(): Route {
-  const raw = window.location.hash.replace(/^#\/?/, '')
-  const [first, second] = raw.split('/')
-  const baseView = first.split('?')[0]
-  const query = first.includes('?') ? first.slice(first.indexOf('?')) : undefined
-  if (baseView === 'payout') return { view: 'attendance' }
-  const view = (VIEWS.includes(baseView as View) ? baseView : 'attendance') as View
-  return { view, id: second || query }
+function readView(): View {
+  const name = window.location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]
+  return VIEWS.includes(name as View) ? (name as View) : 'attendance'
 }
 
 export default function App() {
-  const [route, setRoute] = useState<Route>(() => parseHash())
-
+  const [view, setView] = useState(readView)
   useEffect(() => {
-    const onHashChange = () => setRoute(parseHash())
-    window.addEventListener('hashchange', onHashChange)
-    return () => window.removeEventListener('hashchange', onHashChange)
+    const update = () => setView(readView())
+    window.addEventListener('hashchange', update)
+    return () => window.removeEventListener('hashchange', update)
   }, [])
 
-  useEffect(() => {
-    const names: Record<View, string> = {
-      attendance: 'Attendance',
-      employees: 'Employees',
-      upad: 'Upad',
-      reports: 'Reports',
-      settings: 'Settings',
-    }
-    document.title = `${names[route.view]} · હાજરી પગાર`
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [route.view, route.id])
-
-  function navigate(path: string) {
-    const next = path.replace(/^#\/?/, '')
-    if (window.location.hash === `#${next}`) return
+  function navigate(next: View) {
     window.location.hash = next
+    setView(next)
   }
 
-  let page: React.ReactNode
-  if (route.view === 'employees' && route.id) {
-    page = <EmployeeDetailPage employeeId={route.id} onNavigate={navigate} />
-  } else if (route.view === 'employees') {
-    page = <EmployeesPage onNavigate={navigate} />
-  } else if (route.view === 'upad') {
-    page = <UpadPage onNavigate={navigate} />
-  } else if (route.view === 'reports') {
-    page = <ReportsPage runId={route.id} onNavigate={navigate} />
-  } else if (route.view === 'settings') {
-    page = <SettingsPage />
-  } else {
-    page = <AttendancePage onNavigate={navigate} />
-  }
+  useEffect(() => {
+    document.title = `${view === 'attendance' ? 'Attendance' : view[0].toUpperCase() + view.slice(1)} · Kapil Products`
+    window.scrollTo({ top: 0 })
+  }, [view])
+
+  const page = view === 'employees' ? <EmployeesPage />
+    : view === 'upad' ? <UpadPage />
+      : view === 'reports' ? <ReportsPage />
+        : view === 'settings' ? <SettingsPage />
+          : <AttendancePage />
 
   return (
-    <ToastProvider>
-      <AppShell current={route.view} onNavigate={(view) => navigate(view)}>
-        <ErrorBoundary key={route.view}>
+    <AppShell current={view} onNavigate={navigate}>
+      <ErrorBoundary key={view}>
+        <Suspense fallback={<div role="status" aria-live="polite" className="mx-auto max-w-7xl p-8 text-sm text-stone-500">Loading…</div>}>
           {page}
-        </ErrorBoundary>
-      </AppShell>
-    </ToastProvider>
+        </Suspense>
+      </ErrorBoundary>
+    </AppShell>
   )
 }

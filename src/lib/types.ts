@@ -1,40 +1,18 @@
 export type AttendanceStatus = 'full' | 'half' | 'absent' | 'hours'
+export type EmployeeStatus = 'active' | 'inactive'
+export type UpadKind = 'give' | 'deduct' | 'repay'
 
 export type Employee = {
   id: string
-  employee_no: string
   name: string
   phone: string
-  active: boolean
+  role: string
   daily_rate_paise: number
-  opening_salary_paise: number
-  opening_upad_paise?: number
-  opening_date?: string
-  opening_chalu_paise?: number
-  opening_moto_paise?: number
+  status: EmployeeStatus
+  opening_upad_paise: number
+  opening_carry_paise: number
+  paid_up_to: string
   joined_on: string
-  notes: string
-  sort_order: number
-  created: string
-  updated: string
-}
-
-export type RateHistory = {
-  id: string
-  employee: string
-  effective_from: string
-  daily_rate_paise: number
-  note: string
-  created: string
-}
-
-export type EmploymentPeriod = {
-  id: string
-  employee: string
-  start_date: string
-  end_date: string
-  note: string
-  created: string
 }
 
 export type Attendance = {
@@ -42,154 +20,95 @@ export type Attendance = {
   employee: string
   date: string
   status: AttendanceStatus
-  worked_minutes?: number
+  worked_minutes: number
   ot_minutes: number
-  note: string
-  created: string
-  updated: string
-  settled_payout?: string
+  notes: string
+  settled_payout: string
 }
-
-export type AdjustmentKind = 'bonus' | 'reimbursement' | 'deduction'
-
-export type Adjustment = {
-  id: string
-  employee: string
-  date: string
-  amount_paise: number
-  kind?: AdjustmentKind
-  note: string
-  created: string
-  settled_payout?: string
-  payout_id?: string
-}
-
-export type UpadKind = 'given' | 'recovery' | 'returned' | 'writeoff'
-
-export type UpadCategory = 'chalu' | 'moto' | 'regular' | 'extra'
 
 export type UpadEntry = {
   id: string
   employee: string
   date: string
   kind: UpadKind
-  category: UpadCategory | ''
-  bucket?: 'chalu' | 'moto' | ''
   amount_paise: number
   note: string
-  statement?: string
-  payout?: string
-  payout_id?: string
-  voided?: boolean
-  created: string
+  payout_id: string
+  voided: boolean
+}
+
+export type CycleDraft = {
+  id: string
+  employee: string
+  adj_paise: number
+  adj_note: string
+  deduct_paise: number
+  give_upad_paise: number
+  typed_paise: number | null
+  is_done: boolean
 }
 
 export type PayoutRun = {
   id: string
-  cycle_start: string
-  payout_date: string
-  cutoff_date?: string
-  status: string
-  note: string
-  total_due_paise: number
+  run_date: string
   total_paid_paise: number
-  total_upad_recovery_paise: number
-  employee_count: number
-  voided?: boolean
-  created: string
+  status: 'pending' | 'completed'
+  voided: boolean
 }
 
 export type Statement = {
   id: string
   payout_run: string
   employee: string
-  cycle_start: string
-  payout_date: string
+  start_date: string
+  end_date: string
   opening_paise: number
   earned_paise: number
   adjustment_paise: number
-  upad_outstanding_paise: number
-  upad_recovery_paise: number
-  total_due_paise: number
+  upad_deduct_paise: number
+  upad_give_paise: number
+  calculated_paise: number
   paid_paise: number
   closing_paise: number
-  days_worked: number
-  ot_minutes: number
-  note: string
-  voided?: boolean
-  created: string
+  voided: boolean
 }
 
 export type SalaryPayment = {
   id: string
+  payout_run: string
   employee: string
-  statement: string
-  paid_on: string
   amount_paise: number
-  note: string
-  voided?: boolean
-  created: string
+  voided: boolean
 }
 
-export type SalaryWriteoff = {
+export type Holiday = { id: string; date: string; note: string }
+
+export type CycleAudit = {
   id: string
-  worker: string
-  payout?: string
-  date: string
-  amount_paise: number
-  note: string
-  voided?: boolean
-  created?: string
+  payout_run: string
+  action: string
+  unlocked_by: string
+  unlocked_at: string
+  reason: string
+  snapshot: Record<string, unknown>
 }
 
-export type CycleDraft = {
+export type Settings = {
   id: string
-  employee: string
-  cycle_start: string
-  deduct_paise: number
-  give_upad_paise: number
-  paid_paise: number | null
-  paid_date: string
-  work_counted_up_to: string
-  is_done: boolean
-  created_upad_ids?: string
-  note?: string
-  created?: string
-  updated?: string
+  shift_hours: number
+  ot_multiplier: number
+  company_name: string
+  language: 'en' | 'gu'
 }
 
-export type AppSetting = {
-  id: string
-  key: string
-  value: string
-  created: string
-  updated: string
-}
-
-export type SettingsMap = Record<string, string>
-
-export type CycleRow = {
-  employee: Employee
-  openingPaise: number
-  earnedPaise: number
-  adjustmentPaise: number
-  regularUpadPaise: number
-  extraUpadPaise: number
-  returnedUpadPaise: number
-  upadOutstandingPaise: number
-  upadRecoveryPaise: number
-  totalDuePaise: number
-  paidPaise: number
-  closingPaise: number
-  daysWorked: number
-  otMinutes: number
-  attendanceCount: number
-  included: boolean
-}
-
-export type PayoutInputRow = {
-  employeeId: string
-  recoveryPaise: number
-  paidPaise: number
-  note: string
+export type AppData = {
+  employees: Employee[]
+  attendance: Attendance[]
+  upad: UpadEntry[]
+  drafts: CycleDraft[]
+  runs: PayoutRun[]
+  statements: Statement[]
+  payments: SalaryPayment[]
+  holidays: Holiday[]
+  settings: Settings
 }

@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <div className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-rose-100 text-rose-600 mb-3 text-xl font-black">
               ⚠
             </div>
-            <h2 className="text-base font-bold text-rose-950">Something went wrong</h2>
+            <h1 className="text-base font-bold text-rose-950">Something went wrong</h1>
             <p className="mt-1 text-xs text-rose-800 break-words">
               {this.state.error?.message || 'An unexpected rendering error occurred.'}
             </p>

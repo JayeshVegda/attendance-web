@@ -1,579 +1,493 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  ArrowRight,
-  HandCoins,
-  Phone,
-  Plus,
-  Search,
-  UserCheck,
-  UserPlus,
-  Users,
-  Wallet,
-} from 'lucide-react'
+import { Plus, Search, Trash2, Users } from 'lucide-react'
 import clsx from 'clsx'
 import {
   createEmployee,
-  getPayrollData,
-  getSettings,
-  listEmployees,
-  listRates,
-  listStatements,
-  listUpadEntries,
-} from '../lib/api'
-import { getWorkerUpadBalance, type UpadRow } from '../lib/engine'
-import { addDays, formatDateLong, formatDateShort, todayKey } from '../lib/dates'
-import { formatMoney, parseMoneyInput } from '../lib/money'
-import { dayPayPaise, getRateForDate, latestStatementByEmployee } from '../lib/payroll'
-import { UpadModal } from '../components/UpadModal'
-import { useToast } from '../components/Toast'
+  deleteEmployee,
+  latestStatement,
+  loadAppData,
+  updateEmployee,
+} from '../lib/attendance-service'
 import {
-  Avatar,
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  Field,
-  Input,
-  Modal,
-  PageHeader,
-  SearchInput,
-  Spinner,
-  Stat,
-  Tabs,
-} from '../components/ui'
+  calcDayEarnings,
+  calcUpadBalance,
+  formatMoney,
+  paiseToInput,
+  parseMoneyInput,
+} from '../lib/attendance-calc'
+import { dateKey, todayKey } from '../lib/dates'
+import { tx, useLanguage } from '../lib/i18n'
+import type { Employee } from '../lib/types'
+import { Avatar, Modal } from '../components/ui'
 
-type Filter = 'active' | 'inactive' | 'all'
+type WorkerForm = {
+  name: string
+  phone: string
+  role: string
+  rate: string
+  upad: string
+  carry: string
+  joined: string
+  status: 'active' | 'inactive'
+}
 
-export default function EmployeesPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const [filter, setFilter] = useState<Filter>('active')
-  const [search, setSearch] = useState('')
-  const [addOpen, setAddOpen] = useState(false)
-  const [upadTargetId, setUpadTargetId] = useState<string | null>(null)
+const emptyForm = (): WorkerForm => ({
+  name: '',
+  phone: '',
+  role: '',
+  rate: '',
+  upad: '0',
+  carry: '0',
+  joined: todayKey(),
+  status: 'active',
+})
+
+export default function EmployeesPage() {
+  useLanguage()
   const queryClient = useQueryClient()
+  const query = useQuery({ queryKey: ['attendance-data'], queryFn: loadAppData })
 
-  const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
-  const ratesQuery = useQuery({ queryKey: ['rates'], queryFn: listRates })
-  const statementsQuery = useQuery({ queryKey: ['statements'], queryFn: listStatements })
-  const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
-  const today = todayKey()
-  const cycleStart = useMemo(() => addDays(today, -30), [today])
-  const payrollQuery = useQuery({ queryKey: ['payroll', cycleStart, today], queryFn: () => getPayrollData(cycleStart, today) })
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('active')
+  const [formOpen, setFormOpen] = useState(false)
+  const [editing, setEditing] = useState<Employee | null>(null)
+  const [form, setForm] = useState<WorkerForm>(emptyForm())
+  const [deleteConfirm, setDeleteConfirm] = useState<Employee | null>(null)
 
-  const employees = employeesQuery.data ?? []
-  const latestStatements = useMemo(
-    () => latestStatementByEmployee(statementsQuery.data ?? []),
-    [statementsQuery.data],
-  )
+  function refresh() {
+    return queryClient.invalidateQueries({ queryKey: ['attendance-data'] })
+  }
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    return employees.filter((employee) => {
-      if (filter === 'active' && !employee.active) return false
-      if (filter === 'inactive' && employee.active) return false
-      if (!term) return true
-      return (
-        employee.name.toLowerCase().includes(term) ||
-        employee.employee_no.toLowerCase().includes(term) ||
-        employee.phone.toLowerCase().includes(term)
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const name = form.name.trim()
+      if (!name) throw new Error('Worker name is required.')
+
+      const payload = {
+        name,
+        phone: form.phone.trim(),
+        role: form.role.trim(),
+        daily_rate_paise: parseMoneyInput(form.rate),
+        opening_upad_paise: parseMoneyInput(form.upad),
+        opening_carry_paise: parseMoneyInput(form.carry),
+        joined_on: `${form.joined || todayKey()} 00:00:00.000Z`,
+        status: form.status,
+      }
+
+      if (editing) {
+        return updateEmployee(editing.id, payload)
+      }
+      return createEmployee(payload)
+    },
+    onSuccess: () => {
+      setFormOpen(false)
+      setEditing(null)
+      setForm(emptyForm())
+      void refresh()
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteEmployee(id),
+    onSuccess: () => {
+      setDeleteConfirm(null)
+      void refresh()
+    },
+  })
+
+  const statusToggleMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: 'active' | 'inactive' }) =>
+      updateEmployee(id, { status }),
+    onSuccess: refresh,
+  })
+
+  if (query.isLoading) {
+    return <div role="status" aria-live="polite" className="p-8 text-center text-xs font-semibold text-stone-500">{tx("Loading worker roster…")}</div>
+  }
+  if (query.isError || !query.data) {
+    return <div role="alert" aria-live="assertive" className="p-4 text-xs font-bold text-rose-700">{tx('Could not load worker data from database.')}</div>
+  }
+
+  const { employees, attendance, upad, statements, runs, settings } = query.data
+
+  const rows = employees
+    .filter((w) => statusFilter === 'all' || w.status === statusFilter)
+    .filter((w) => `${w.name} ${w.role} ${w.phone}`.toLowerCase().includes(search.toLowerCase()))
+    .map((worker) => {
+      const workerUpad = upad.filter((e) => e.employee === worker.id && !e.voided)
+      const currentUpad = calcUpadBalance(worker.opening_upad_paise, workerUpad)
+
+      const lastStmt = latestStatement(statements, worker.id, runs)
+      const carry = lastStmt ? lastStmt.closing_paise : worker.opening_carry_paise ?? 0
+      const boundary = worker.paid_up_to ? worker.paid_up_to.slice(0, 10) : ''
+      const openAttendance = attendance.filter(
+        (a) => a.employee === worker.id && !a.settled_payout && (!boundary || dateKey(a.date) > boundary),
       )
+      const openDaysCount = openAttendance.length
+      const openEarnings = openAttendance.reduce(
+        (sum, a) =>
+          sum +
+          calcDayEarnings(a, worker.daily_rate_paise, settings.shift_hours, settings.ot_multiplier).earned_paise,
+        0,
+      )
+
+      // Can delete only if zero attendance and zero upad
+      const totalAttCount = attendance.filter((a) => a.employee === worker.id).length
+      const totalUpadCount = upad.filter((e) => e.employee === worker.id).length
+      const canDelete = totalAttCount === 0 && totalUpadCount === 0
+
+      return {
+        worker,
+        currentUpad,
+        carry,
+        openDaysCount,
+        openEarnings,
+        canDelete,
+      }
     })
-  }, [employees, filter, search])
 
-  const totals = useMemo(() => {
-    // Exclude future joiners from active staff count and wage bill
-    const currentlyActive = employees.filter((employee) => employee.active && (!employee.joined_on || employee.joined_on <= today))
-    const totalCarryAll = employees.reduce(
-      (sum, employee) => sum + (latestStatements.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
-      0,
-    )
-    const totalCarryActive = currentlyActive.reduce(
-      (sum, employee) => sum + (latestStatements.get(employee.id)?.closing_paise ?? employee.opening_salary_paise ?? 0),
-      0,
-    )
-
-    const totalUpadAll = employees.reduce((sum, employee) => {
-      const upadRows: UpadRow[] = (upadQuery.data ?? [])
-        .filter((u) => u.employee === employee.id && !u.voided)
-        .map((u) => ({
-          id: u.id,
-          employee: u.employee,
-          date: u.date.slice(0, 10),
-          kind: u.kind,
-          amount_paise: u.amount_paise,
-        }))
-      return sum + getWorkerUpadBalance(upadRows, employee.opening_upad_paise ?? 0)
-    }, 0)
-
-    const totalUpadActive = currentlyActive.reduce((sum, employee) => {
-      const upadRows: UpadRow[] = (upadQuery.data ?? [])
-        .filter((u) => u.employee === employee.id && !u.voided)
-        .map((u) => ({
-          id: u.id,
-          employee: u.employee,
-          date: u.date.slice(0, 10),
-          kind: u.kind,
-          amount_paise: u.amount_paise,
-        }))
-      return sum + getWorkerUpadBalance(upadRows, employee.opening_upad_paise ?? 0)
-    }, 0)
-
-    return {
-      active: currentlyActive.length,
-      totalCount: employees.length,
-      dailyWage: currentlyActive.reduce((sum, employee) => sum + employee.daily_rate_paise, 0),
-      salaryDue: totalCarryAll,
-      salaryDueActive: totalCarryActive,
-      upad: totalUpadAll,
-      upadActive: totalUpadActive,
+  function openEdit(worker?: Employee) {
+    setEditing(worker ?? null)
+    setFormOpen(true)
+    if (worker) {
+      setForm({
+        name: worker.name,
+        phone: worker.phone || '',
+        role: worker.role || '',
+        rate: paiseToInput(worker.daily_rate_paise),
+        upad: paiseToInput(worker.opening_upad_paise),
+        carry: paiseToInput(worker.opening_carry_paise),
+        joined: worker.joined_on ? dateKey(worker.joined_on) : todayKey(),
+        status: worker.status,
+      })
+    } else {
+      setForm(emptyForm())
     }
-  }, [employees, latestStatements, upadQuery.data, today])
+  }
 
-  const loading = employeesQuery.isLoading || ratesQuery.isLoading
+  const activeCount = employees.filter((w) => w.status === 'active').length
+  const inactiveCount = employees.filter((w) => w.status === 'inactive').length
 
   return (
-    <div>
-      <PageHeader
-        eyebrow="Team Management"
-        title="Employees"
-        description="Daily wage rates, joining dates, unpaid balances, and upad advances. History is preserved permanently."
-        actions={
-          <Button onClick={() => setAddOpen(true)}>
-            <UserPlus className="h-4 w-4" />
-            <span>Add Employee</span>
-          </Button>
-        }
-      />
-
-      {/* KPI Stats */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat
-          label="Active Staff"
-          value={totals.active}
-          hint={`${totals.totalCount} staff records (${totals.totalCount - totals.active} inactive/future)`}
-          icon={<Users className="h-5 w-5" />}
-          tone="teal"
-        />
-        <Stat
-          label="Daily Wage Bill"
-          value={formatMoney(totals.dailyWage)}
-          hint={`Sum of current ${totals.active} active rates`}
-          icon={<Wallet className="h-5 w-5" />}
-        />
-        <Stat
-          label="Salary Due"
-          value={formatMoney(totals.salaryDue)}
-          hint={`Active: ${formatMoney(totals.salaryDueActive)} · Inactive: ${formatMoney(totals.salaryDue - totals.salaryDueActive)}`}
-          tone="amber"
-        />
-        <Stat
-          label="Upad Outstanding"
-          value={formatMoney(totals.upad)}
-          hint={`Active: ${formatMoney(totals.upadActive)} · Inactive: ${formatMoney(totals.upad - totals.upadActive)}`}
-          tone="red"
-          icon={<HandCoins className="h-5 w-5" />}
-        />
-      </div>
-
-      {/* Toolbar */}
-      <Card className="mb-4 p-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Tabs
-            value={filter}
-            onChange={(val) => setFilter(val as Filter)}
-            options={[
-              { id: 'active', label: 'Active', count: totals.active },
-              { id: 'inactive', label: 'Inactive', count: totals.totalCount - totals.active },
-              { id: 'all', label: 'All Records', count: totals.totalCount },
-            ]}
-          />
-
-          <div className="w-full sm:w-72">
-            <SearchInput
-              placeholder="Search by name, #ID, phone…"
+    <div className="space-y-3">
+      <h1 className="sr-only">{tx('Workers')}</h1>
+      {/* Top Header & Search Bar */}
+      <div className="flex flex-col gap-2.5 rounded-xl border border-stone-200 bg-white p-3.5 shadow-2xs sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative min-w-48 sm:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
+            <input
               value={search}
-              onChange={setSearch}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label={tx('Search workers')}
+              placeholder={tx("Search name, role, phone…")}
+              className="h-8 w-full rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-2.5 text-xs font-medium outline-none transition focus:border-stone-900 focus:bg-white"
             />
           </div>
-        </div>
-      </Card>
 
-      {employeesQuery.isError ? (
-        <Card className="p-8">
-          <EmptyState
-            title="Could not load employees"
-            description="Check the local database connection."
-            action={<Button onClick={() => employeesQuery.refetch()}>Retry</Button>}
-          />
-        </Card>
-      ) : loading ? (
-        <Card className="p-16">
-          <div className="flex flex-col items-center justify-center gap-2 text-sm font-semibold text-stone-500">
-            <Spinner className="h-6 w-6" />
-            <span>Loading employees…</span>
+          <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100 p-0.5 text-xs font-semibold text-stone-600">
+            {(['active', 'all', 'inactive'] as const).map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setStatusFilter(f)}
+                className={clsx(
+                  'rounded-md px-2.5 py-1 text-[11px] capitalize transition cursor-pointer',
+                  statusFilter === f
+                    ? 'bg-white font-bold text-stone-900 shadow-2xs'
+                    : 'hover:text-stone-900',
+                )}
+              >
+                {tx(f)} ({f === 'active' ? activeCount : f === 'inactive' ? inactiveCount : employees.length})
+              </button>
+            ))}
           </div>
-        </Card>
-      ) : !filtered.length ? (
-        <Card className="p-8">
-          <EmptyState
-            icon={<Users className="h-7 w-7 text-stone-400" />}
-            title={
-              search
-                ? 'No matching employees'
-                : filter === 'inactive'
-                  ? 'No inactive employees'
-                  : 'No employees yet'
-            }
-            description={
-              search
-                ? 'Try a different search term or employee ID.'
-                : 'Add your first employee to begin tracking attendance and wages.'
-            }
-            action={
-              !search && filter !== 'inactive' ? (
-                <Button onClick={() => setAddOpen(true)}>
-                  <Plus className="h-4 w-4" /> Add employee
-                </Button>
-              ) : undefined
-            }
-          />
-        </Card>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-stone-200 bg-white shadow-2xs">
-          <table className="w-full border-collapse text-left text-xs">
-            <thead className="bg-stone-50 border-b border-stone-200 text-stone-700 font-black uppercase text-[10px] tracking-wider select-none">
+        </div>
+
+        <button
+          type="button"
+          onClick={() => openEdit()}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-700 px-3.5 text-xs font-bold text-white shadow-xs transition hover:bg-emerald-800 active:scale-[0.96] cursor-pointer"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {tx("Add Worker")}
+        </button>
+      </div>
+
+      {/* Scannable Compact Worker Table */}
+      <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-2xs">
+        <div className="overflow-x-auto">
+          <table aria-label={tx('Workers')} className="w-full text-left text-xs">
+            <caption className="sr-only">{tx('Workers')}</caption>
+            <thead className="border-b border-stone-200 bg-stone-50/95 text-[11px] font-semibold text-stone-600">
               <tr>
-                <th className="py-2.5 px-3 min-w-[13rem]">Worker</th>
-                <th className="py-2.5 px-2.5">Status</th>
-                <th className="py-2.5 px-2.5 text-right">Wage Rate</th>
-                <th className="py-2.5 px-2.5 text-right">Salary Due</th>
-                <th className="py-2.5 px-2.5 text-right bg-amber-50/40 text-amber-950 font-black">Upad Balance</th>
-                <th className="py-2.5 px-2.5">Contact</th>
-                <th className="py-2.5 px-3 text-right">Actions</th>
+                <th className="px-3.5 py-2.5">{tx("Worker")}</th>
+                <th className="px-3 py-2.5 text-right font-semibold">{tx("Rate / day")}</th>
+                <th className="px-3 py-2.5 text-center font-semibold">{tx("Status")}</th>
+                <th className="px-3 py-2.5 text-right font-semibold">{tx("Upad Balance")}</th>
+                <th className="px-3 py-2.5 text-right font-semibold">{tx("Signed Carry")}</th>
+                <th className="px-3 py-2.5 text-right font-semibold">{tx("This Cycle")}</th>
+                <th className="px-3 py-2.5 text-right font-semibold">{tx("Action")}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-stone-100 font-medium">
-              {filtered.map((employee, index) => {
-                const latest = latestStatements.get(employee.id)
-                const carry = latest?.closing_paise ?? employee.opening_salary_paise ?? 0
-                const employeeAttendance =
-                  payrollQuery.data?.attendance?.filter(
-                    (a) => a.employee === employee.id && !a.settled_payout,
-                  ) ?? []
-                let earnedCycle = 0
-                for (const a of employeeAttendance) {
-                  const r = getRateForDate(employee, ratesQuery.data ?? [], a.date)
-                  earnedCycle += dayPayPaise(a.status, a.ot_minutes || 0, r)
-                }
-                const employeeAdjustments =
-                  payrollQuery.data?.adjustments?.filter(
-                    (adj) => adj.employee === employee.id && !adj.settled_payout,
-                  ) ?? []
-                const adjustmentCycle = employeeAdjustments.reduce(
-                  (sum, adj) => sum + (adj.amount_paise || 0),
-                  0,
-                )
-                const owedNow = carry + earnedCycle + adjustmentCycle
+            <tbody className="divide-y divide-stone-100">
+              {rows.map(({ worker, currentUpad, carry, openDaysCount, openEarnings, canDelete }) => (
+                <tr
+                  key={worker.id}
+                  className={clsx(
+                    'transition hover:bg-stone-50/70',
+                    worker.status === 'inactive' && 'bg-stone-50/40 opacity-60',
+                  )}
+                >
+                  <td className="px-3.5 py-2">
+                    <div className="flex items-center gap-2">
+                      <Avatar name={worker.name} size="sm" />
+                      <div>
+                        <div className="font-bold text-stone-900">{worker.name}</div>
+                        <div className="text-[10px] text-stone-400">
+                          {tx(worker.role || 'Worker')} {worker.phone ? `· ${worker.phone}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
 
-                const upadRows: UpadRow[] = (upadQuery.data ?? [])
-                  .filter((u) => u.employee === employee.id && !u.voided)
-                  .map((u) => ({
-                    id: u.id,
-                    employee: u.employee,
-                    date: u.date.slice(0, 10),
-                    kind: u.kind,
-                    amount_paise: u.amount_paise,
-                  }))
-                const upadTotal = getWorkerUpadBalance(upadRows, employee.opening_upad_paise ?? 0)
+                  <td className="px-3 py-2 text-right font-black tabular-nums text-stone-800">
+                    {formatMoney(worker.daily_rate_paise)}
+                  </td>
 
-                return (
-                  <tr
-                    key={employee.id}
-                    className={clsx(
-                      'hover:bg-stone-50/80 transition-colors',
-                      !employee.active && 'opacity-60 bg-stone-50/30',
+                  <td className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        statusToggleMutation.mutate({
+                          id: worker.id,
+                          status: worker.status === 'active' ? 'inactive' : 'active',
+                        })
+                      }
+                      title={`${tx('Click to switch to')} ${tx(worker.status === 'active' ? 'inactive' : 'active')}`}
+                      className={clsx(
+                        'inline-flex rounded-full px-2 py-0.5 text-[9px] font-black uppercase transition',
+                        worker.status === 'active'
+                          ? 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-600/20 hover:bg-emerald-100'
+                          : 'bg-stone-200 text-stone-600 hover:bg-stone-300',
+                      )}
+                    >
+                      {tx(worker.status)}
+                    </button>
+                  </td>
+
+                  <td className="px-3 py-2 text-right font-black tabular-nums">
+                    <span className={currentUpad > 0 ? 'text-rose-800' : 'text-stone-400'}>
+                      {formatMoney(currentUpad)}
+                    </span>
+                  </td>
+
+                  <td className="px-3 py-2 text-right font-black tabular-nums">
+                    {carry > 0 ? (
+                      <span className="text-amber-800">+{formatMoney(carry)}</span>
+                    ) : carry < 0 ? (
+                      <span className="text-rose-700">−{formatMoney(Math.abs(carry))}</span>
+                    ) : (
+                      <span className="text-stone-400">₹0</span>
                     )}
-                  >
-                    {/* 1. Worker with Index Pill */}
-                    <td className="py-2 px-3">
+                  </td>
+
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <span className="font-bold text-emerald-800">{openDaysCount}d</span>{' '}
+                    <span className="text-[10px] text-stone-400">({formatMoney(openEarnings)})</span>
+                  </td>
+
+                  <td className="px-3 py-2 text-right space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(worker)}
+                      className="rounded border border-stone-200 bg-white px-2 py-1 text-[11px] font-bold text-stone-700 shadow-xs hover:border-stone-300 hover:bg-stone-50"
+                    >
+                      {tx("Edit")}
+                    </button>
+                    {canDelete ? (
                       <button
                         type="button"
-                        onClick={() => onNavigate(`employees/${employee.id}`)}
-                        className="flex items-center gap-2 text-left group"
+                        onClick={() => setDeleteConfirm(worker)}
+                        title={tx("Delete worker (only permitted with 0 attendance and 0 upad)")}
+                        className="rounded border border-stone-200 bg-white p-1 text-stone-400 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
                       >
-                        <span className="inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded bg-stone-100 border border-stone-300 font-mono text-[10px] font-black text-stone-700 shadow-2xs group-hover:bg-emerald-50 group-hover:border-emerald-300 group-hover:text-emerald-800 transition">
-                          {index + 1}
-                        </span>
-                        <Avatar name={employee.name} size="sm" />
-                        <div>
-                          <div className="font-extrabold text-stone-900 group-hover:text-emerald-700 transition">
-                            {employee.name}
-                          </div>
-                          <div className="text-[10px] text-stone-400">
-                            #{employee.employee_no}
-                            {employee.joined_on && (
-                              <span> · Joined {formatDateShort(employee.joined_on)}</span>
-                            )}
-                          </div>
-                        </div>
+                        <Trash2 className="h-3 w-3" />
                       </button>
-                    </td>
-
-                    {/* 2. Status */}
-                    <td className="py-2 px-2.5">
-                      <Badge tone={employee.active ? 'green' : 'neutral'} dot>
-                        {employee.active ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </td>
-
-                    {/* 3. Wage Rate */}
-                    <td className="py-2 px-2.5 text-right tabular-nums font-bold text-stone-900">
-                      {formatMoney(employee.daily_rate_paise)}
-                      <span className="text-[10px] text-stone-400 font-normal">/d</span>
-                    </td>
-
-                    {/* 4. Salary Due */}
-                    <td className="py-2 px-2.5 text-right tabular-nums">
-                      <span
-                        className={clsx(
-                          'font-black',
-                          owedNow > 0 ? 'text-amber-800' : 'text-stone-700',
-                        )}
-                      >
-                        {formatMoney(owedNow, { showZero: true })}
-                      </span>
-                      {carry > 0 && (
-                        <div className="text-[9px] text-stone-400">Carry: {formatMoney(carry)}</div>
-                      )}
-                    </td>
-
-                    {/* 5. Upad Balance (Single Unified) */}
-                    <td className="py-2 px-2.5 text-right tabular-nums bg-amber-50/20">
-                      <span
-                        className={clsx(
-                          'font-black',
-                          upadTotal > 0 ? 'text-amber-900' : 'text-stone-400',
-                        )}
-                      >
-                        {formatMoney(upadTotal, { showZero: true })}
-                      </span>
-                    </td>
-
-                    {/* 6. Contact */}
-                    <td className="py-2 px-2.5 text-stone-600 whitespace-nowrap">
-                      {employee.phone ? (
-                        <a
-                          href={`tel:${employee.phone}`}
-                          className="inline-flex items-center gap-1 hover:text-emerald-700 transition"
-                          title="Call employee"
-                        >
-                          <Phone className="h-3 w-3 text-stone-400" />
-                          <span>{employee.phone}</span>
-                        </a>
-                      ) : (
-                        <span className="text-stone-300">—</span>
-                      )}
-                    </td>
-
-                    {/* 7. Actions */}
-                    <td className="py-2 px-3 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setUpadTargetId(employee.id)}
-                          className="rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 px-2 py-1 text-xs font-bold text-amber-900 shadow-2xs transition cursor-pointer"
-                          title="Record upad advance or cash return"
-                        >
-                          + Upad
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onNavigate(`employees/${employee.id}`)}
-                          className="rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 px-2 py-1 text-xs font-bold text-stone-700 shadow-2xs transition cursor-pointer"
-                          title="View full profile and history"
-                        >
-                          View →
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+              {!rows.length && (
+                <tr>
+                  <td colSpan={7} className="p-8 text-center text-xs text-stone-400">
+                    {tx("No workers match this search.")}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Edit / Add Worker Modal */}
+      {formOpen && (
+        <Modal
+          open
+          onClose={() => {
+            setFormOpen(false)
+            setEditing(null)
+          }}
+          title={editing ? `${tx('Edit')}: ${editing.name}` : tx('Add New Worker')}
+        >
+          <div className="space-y-3 text-xs">
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Full Name (required)")}
+                <input
+                  autoFocus
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder={tx("e.g. Ramesh Patel")}
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Role")}
+                <input
+                  value={form.role}
+                  onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  placeholder="e.g. Tailor, Master, Helper"
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2.5 text-xs outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Phone")}
+                <input
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="e.g. 98765 43210"
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2.5 text-xs outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Daily Rate (₹)")}
+                <input
+                  inputMode="decimal"
+                  value={form.rate}
+                  onChange={(e) => setForm({ ...form, rate: e.target.value })}
+                  placeholder="e.g. 500"
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Opening Upad (₹)")}
+                <input
+                  inputMode="decimal"
+                  value={form.upad}
+                  onChange={(e) => setForm({ ...form, upad: e.target.value })}
+                  placeholder="0"
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Opening Salary Carry (₹, signed)")}
+                <input
+                  inputMode="decimal"
+                  value={form.carry}
+                  onChange={(e) => setForm({ ...form, carry: e.target.value })}
+                  placeholder="0"
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Joined Date")}
+                <input
+                  type="date"
+                  value={form.joined}
+                  onChange={(e) => setForm({ ...form, joined: e.target.value })}
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 px-2 text-xs font-bold outline-none focus:border-emerald-600"
+                />
+              </label>
+
+              <label className="text-[10px] font-bold text-stone-700">
+                {tx("Status")}
+                <select
+                  value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value as 'active' | 'inactive' })}
+                  className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 bg-white px-2 text-xs font-bold outline-none"
+                >
+                  <option value="active">{tx("Active")}</option>
+                  <option value="inactive">{tx("Inactive")}</option>
+                </select>
+              </label>
+            </div>
+
+            {saveMutation.isError && (
+              <p role="alert" aria-live="assertive" className="text-xs font-bold text-rose-700">
+                {saveMutation.error.message}
+              </p>
+            )}
+
+            <div className="mt-4 flex justify-end gap-2 border-t border-stone-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setFormOpen(false)}
+                className="rounded-lg border border-stone-200 px-3 py-1.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+              >
+                {tx("Cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={saveMutation.isPending || !form.name.trim()}
+                onClick={() => saveMutation.mutate()}
+                className="rounded-lg bg-emerald-700 px-4 py-1.5 text-xs font-black text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {saveMutation.isPending ? tx('Saving…') : tx('Save Worker')}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
-      {/* Add Employee Modal */}
-      <AddEmployeeModal
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        onCreated={(id) => {
-          queryClient.invalidateQueries({ queryKey: ['employees'] })
-          queryClient.invalidateQueries({ queryKey: ['rates'] })
-          queryClient.invalidateQueries({ queryKey: ['periods'] })
-          setAddOpen(false)
-          onNavigate(`employees/${id}`)
-        }}
-      />
-
-      {/* Quick Upad Modal for single employee */}
-      {upadTargetId && (
-        <UpadModal
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <Modal
           open
-          onClose={() => setUpadTargetId(null)}
-          employees={employees}
-          defaultEmployeeId={upadTargetId}
-        />
+          onClose={() => setDeleteConfirm(null)}
+          title={`${tx('Delete')} ${deleteConfirm.name}?`}
+        >
+          <div className="space-y-3 text-xs">
+            <p className="text-stone-600">
+              {tx("Are you sure you want to delete")} <b>{deleteConfirm.name}</b>{tx("? This worker has no recorded attendance or Upad transactions.")}
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                className="rounded-lg border border-stone-200 px-3 py-1.5 font-bold text-stone-700 hover:bg-stone-50"
+              >
+                {tx("Cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(deleteConfirm.id)}
+                className="rounded-lg bg-rose-700 px-4 py-1.5 font-black text-white hover:bg-rose-800 disabled:opacity-50"
+              >
+                {deleteMutation.isPending ? 'Deleting…' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
-  )
-}
-
-function AddEmployeeModal({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean
-  onClose: () => void
-  onCreated: (id: string) => void
-}) {
-  const [name, setName] = useState('')
-  const [employeeNo, setEmployeeNo] = useState('')
-  const [phone, setPhone] = useState('')
-  const [rate, setRate] = useState('450')
-  const [joinedOn, setJoinedOn] = useState(todayKey())
-  const [openingSalary, setOpeningSalary] = useState('')
-  const [openingUpad, setOpeningUpad] = useState('')
-  const [notes, setNotes] = useState('')
-  const [error, setError] = useState('')
-  const toast = useToast()
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      createEmployee({
-        name,
-        employeeNo: employeeNo || undefined,
-        phone,
-        ratePaise: parseMoneyInput(rate),
-        joinedOn,
-        openingSalaryPaise: parseMoneyInput(openingSalary),
-        openingUpadPaise: parseMoneyInput(openingUpad),
-        openingDate: joinedOn,
-        notes,
-      }),
-    onSuccess: (employee) => {
-      toast(`${employee.name} added successfully`)
-      setName('')
-      setEmployeeNo('')
-      setPhone('')
-      setRate('450')
-      setJoinedOn(todayKey())
-      setOpeningSalary('')
-      setOpeningUpad('')
-      setNotes('')
-      onCreated(employee.id)
-    },
-    onError: (err) => setError(err instanceof Error ? err.message : 'Could not add employee'),
-  })
-
-  function submit() {
-    setError('')
-    if (!name.trim()) return setError('Enter the employee name.')
-    if (parseMoneyInput(rate) <= 0) return setError('Enter a daily wage rate greater than zero.')
-    mutation.mutate()
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="Add New Employee"
-      description="Create employee profile with initial daily rate and optional opening balances."
-      size="lg"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
-          <Button onClick={submit} loading={mutation.isPending}>
-            Add Employee
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <div className="grid gap-3.5 sm:grid-cols-2">
-          <Field label="Full Name" className="sm:col-span-2">
-            <Input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Ramesh Patel"
-              autoFocus
-            />
-          </Field>
-          <Field label="Employee Number" hint="Leave blank to auto-assign next number.">
-            <Input
-              value={employeeNo}
-              onChange={(event) => setEmployeeNo(event.target.value)}
-              placeholder="Auto-generated"
-            />
-          </Field>
-          <Field label="Phone Number">
-            <Input
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="e.g. 98250 12345"
-            />
-          </Field>
-          <Field label="Daily Wage Rate (₹)">
-            <Input
-              inputMode="decimal"
-              value={rate}
-              onChange={(event) => setRate(event.target.value)}
-              placeholder="450"
-            />
-          </Field>
-          <Field label="Joined On Date">
-            <Input
-              type="date"
-              value={joinedOn}
-              onChange={(event) => setJoinedOn(event.target.value)}
-            />
-          </Field>
-          <Field label="Opening Salary Due (₹)" hint="Unpaid carryover balance if migrating.">
-            <Input
-              inputMode="decimal"
-              value={openingSalary}
-              onChange={(event) => setOpeningSalary(event.target.value)}
-              placeholder="0"
-            />
-          </Field>
-          <Field label="Opening Upad Balance (₹)" hint="Initial outstanding advance if any.">
-            <Input
-              inputMode="decimal"
-              value={openingUpad}
-              onChange={(event) => setOpeningUpad(event.target.value)}
-              placeholder="0"
-            />
-          </Field>
-        </div>
-
-        <Field label="Internal Notes" hint="Optional notes (role, machine, skills)">
-          <Input
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="e.g. Senior machine operator, shift A"
-          />
-        </Field>
-
-        <div className="rounded-2xl border border-teal-200 bg-teal-50/80 px-4 py-3 text-xs leading-relaxed text-teal-900">
-          A rate record and employment period will be created automatically starting from the joined date.
-        </div>
-
-        {error && <div className="text-xs font-bold text-rose-600">{error}</div>}
-      </div>
-    </Modal>
   )
 }

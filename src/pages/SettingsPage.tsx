@@ -1,441 +1,188 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  AlertCircle,
-  Check,
-  CheckCircle2,
-  Clock,
-  Coins,
-  Copy,
-  Database,
-  HardDrive,
-  Info,
-  Save,
-  ShieldCheck,
-  ToggleLeft,
-  ToggleRight,
-} from 'lucide-react'
-import {
-  getSettings,
-  listEmployees,
-  listRuns,
-  saveSetting,
-} from '../lib/api'
-import {
-  DEFAULT_SETTINGS,
-  isHoursAttendanceEnabled,
-  isRealPayoutRun,
-  hourStepMinutes as getHourStepMinutes,
-} from '../lib/cycle'
-import { pb } from '../lib/pb'
-import { useToast } from '../components/Toast'
-import { getLanguage, setLanguage, type LanguageMode } from '../lib/i18n'
-import { formatMoney } from '../lib/money'
-import {
-  Badge,
-  Button,
-  Card,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  Spinner,
-} from '../components/ui'
-
-const WEEKDAYS = [
-  { value: '0', label: 'Sunday' },
-  { value: '1', label: 'Monday' },
-  { value: '2', label: 'Tuesday' },
-  { value: '3', label: 'Wednesday' },
-  { value: '4', label: 'Thursday' },
-  { value: '5', label: 'Friday (Default)' },
-  { value: '6', label: 'Saturday' },
-]
-
-const LANGUAGES = [
-  { value: 'mixed', label: 'ગુજરાતી + English (Mixed / ભલામણ કરેલ)' },
-  { value: 'gu', label: 'માત્ર ગુજરાતી (Gujarati Only)' },
-  { value: 'en', label: 'English Only' },
-]
+import { Building2, Check, Clock3, Languages, RotateCcw } from 'lucide-react'
+import { getSettings, saveSettings } from '../lib/attendance-service'
+import { setLanguage, tx, useLanguage, type LanguageMode } from '../lib/i18n'
 
 export default function SettingsPage() {
-  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
-  const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
-  const runsQuery = useQuery({ queryKey: ['runs'], queryFn: listRuns })
-  const queryClient = useQueryClient()
-  const toast = useToast()
+  useLanguage()
+  const qc = useQueryClient()
+  const query = useQuery({ queryKey: ['settings'], queryFn: getSettings })
 
-  const [businessName, setBusinessName] = useState('')
-  const [firstCycleStart, setFirstCycleStart] = useState('')
-  const [otDivisor, setOtDivisor] = useState('8')
-  const [payoutWeekday, setPayoutWeekday] = useState('5')
-  const [language, setLangState] = useState<LanguageMode>(() => getLanguage())
-  const [copied, setCopied] = useState(false)
-
-  // Upad & Attendance settings
-  const [upadLabel, setUpadLabel] = useState('Upad')
-  const [hoursAttendanceEnabled, setHoursAttendanceEnabled] = useState(true)
-  const [hourStep, setHourStep] = useState('30')
+  const [shiftHours, setShiftHours] = useState('8')
+  const [otMultiplier, setOtMultiplier] = useState('1')
+  const [companyName, setCompanyName] = useState('Kapil Products')
+  const [language, setLocalLanguage] = useState<LanguageMode>('en')
+  const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    if (!settingsQuery.data) return
-    const s = settingsQuery.data
-    setBusinessName(s.business_name ?? DEFAULT_SETTINGS.business_name)
-    setFirstCycleStart(s.first_cycle_start ?? DEFAULT_SETTINGS.first_cycle_start)
-    setOtDivisor(s.ot_divisor ?? DEFAULT_SETTINGS.ot_divisor)
-    setPayoutWeekday(s.expected_payout_weekday ?? DEFAULT_SETTINGS.expected_payout_weekday)
-    setUpadLabel(s.upad_label ?? 'Upad')
-    setHoursAttendanceEnabled(isHoursAttendanceEnabled(s))
-    setHourStep(String(getHourStepMinutes(s)))
-  }, [settingsQuery.data])
+    if (query.data) {
+      setShiftHours(String(query.data.shift_hours))
+      setOtMultiplier(String(query.data.ot_multiplier))
+      setCompanyName(query.data.company_name)
+      setLocalLanguage(query.data.language)
+    }
+  }, [query.data])
 
   const mutation = useMutation({
-    mutationFn: async () => {
-      setLanguage(language)
-
-      await saveSetting('upad_label', upadLabel.trim() || 'Upad')
-      await saveSetting('hours_attendance_enabled', String(hoursAttendanceEnabled))
-      await saveSetting('hour_step_minutes', hourStep)
-
-      await saveSetting('business_name', businessName.trim() || DEFAULT_SETTINGS.business_name)
-      await saveSetting('first_cycle_start', firstCycleStart)
-      await saveSetting('ot_divisor', String(Number.parseFloat(otDivisor) || 8))
-      await saveSetting('expected_payout_weekday', payoutWeekday)
-      await saveSetting('app_language', language)
-    },
+    mutationFn: () =>
+      saveSettings({
+        shift_hours: Number(shiftHours),
+        ot_multiplier: Number(otMultiplier),
+        company_name: companyName.trim() || 'Kapil Products',
+        language,
+      }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-      queryClient.invalidateQueries({ queryKey: ['payroll'] })
-      queryClient.invalidateQueries({ queryKey: ['upad'] })
-      toast('Settings saved successfully')
-    },
-    onError: (error) => {
-      toast(error instanceof Error ? error.message : 'Could not save settings', 'error')
+      setLanguage(language)
+      setSaved(true)
+      void qc.invalidateQueries({ queryKey: ['settings'] })
+      void qc.invalidateQueries({ queryKey: ['attendance-data'] })
+      window.setTimeout(() => setSaved(false), 2500)
     },
   })
 
-  function copyPath() {
-    navigator.clipboard.writeText('C:\\Site_imp\\attendance-web\\pb\\pb_data')
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-    toast('Data folder path copied to clipboard')
+  if (query.isLoading) {
+    return <div role="status" aria-live="polite" className="p-8 text-center text-xs font-semibold text-stone-500">{tx("Loading settings…")}</div>
+  }
+  if (query.isError || !query.data) {
+    return <div role="alert" aria-live="assertive" className="p-4 text-xs font-bold text-rose-700">{tx("Could not load settings from database.")}</div>
   }
 
-  if (settingsQuery.isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-28 text-sm font-semibold text-stone-500">
-        <Spinner className="h-6 w-6" />
-        <span>Loading settings…</span>
-      </div>
-    )
-  }
-
-  const activeCount = (employeesQuery.data ?? []).filter((employee) => employee.active).length
+  const isValid =
+    Number(shiftHours) > 0 &&
+    Number(shiftHours) <= 24 &&
+    Number(otMultiplier) >= 0 &&
+    Number(otMultiplier) <= 10 &&
+    Boolean(companyName.trim()) &&
+    (language === 'en' || language === 'gu')
 
   return (
-    <div>
-      <PageHeader
-        eyebrow="Configuration & Storage"
-        title="Settings"
-        description="Company profile, payroll calculation divisor, payout rules, and offline backup guidance."
-        actions={
-          <Button onClick={() => mutation.mutate()} loading={mutation.isPending}>
-            <Save className="h-4 w-4" />
-            <span>Save Settings</span>
-          </Button>
-        }
-      />
+    <div className="mx-auto max-w-2xl space-y-3.5">
+      <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs">
+        <h1 className="text-sm font-black text-stone-900">{tx("Application Settings")}</h1>
+        <p className="mt-0.5 text-xs text-stone-500">
+          {tx("Global payroll formulas and business details. Changes recalculate all open cycles immediately without affecting historical statements.")}
+        </p>
+      </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1fr_22rem]">
-        {/* Left column: Business configuration & Guide */}
-        <div className="space-y-5">
-          {/* Upad Settings Card */}
-          <Card className="p-5">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-700 ring-1 ring-amber-600/15">
-                <Coins className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-base font-extrabold text-stone-900">
-                  Advance & Upad Settings
-                </div>
-                <div className="text-xs text-stone-500">
-                  Worker advance tracking and display preferences.
-                </div>
-              </div>
-            </div>
+      <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-xs space-y-4">
+        {/* Workday Calculation */}
+        <div>
+          <div className="flex items-center gap-2 text-xs font-black text-stone-900">
+            <Clock3 className="h-4 w-4 text-emerald-700" />
+            {tx("Workday & Overtime Calculation")}
+          </div>
+          <p className="mt-0.5 text-[11px] text-stone-400">
+            {tx("Shift hours determine the hourly wage rate (daily rate / shift hours). Overtime multiplier applies to OT hours.")}
+          </p>
 
-            <div className="py-2 space-y-3">
-              <div className="max-w-xs">
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500 mb-1">
-                  Display Label (Custom Name)
-                </label>
-                <Input
-                  value={upadLabel}
-                  onChange={(e) => setUpadLabel(e.target.value)}
-                  placeholder="Upad"
-                  className="text-xs font-medium"
-                />
-              </div>
-              <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3 text-[11px] leading-relaxed text-stone-600">
-                <strong className="text-stone-800">Single Upad Ledger:</strong> Workers have one unified Upad balance. Advances, deductions, cash returns, and write-offs are recorded directly into each worker's dated history.
-              </div>
-            </div>
-          </Card>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="text-[11px] font-bold text-stone-700">
+              {tx("Shift Hours (1 full day)")}
+              <input
+                type="number"
+                min="1"
+                max="24"
+                step="0.5"
+                value={shiftHours}
+                onChange={(e) => setShiftHours(e.target.value)}
+                className="mt-1 h-8 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+              />
+              <span className="mt-1 block text-[10px] text-stone-400">{tx("Standard factory shift (e.g. 8 or 12 hours)")}</span>
+            </label>
 
-          {/* Hours-Based Attendance Card */}
-          <Card className="p-5">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-700 ring-1 ring-sky-600/15">
-                <Clock className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-base font-extrabold text-stone-900">
-                  Hours-Based Attendance
-                </div>
-                <div className="text-xs text-stone-500">
-                  Allow workers to log exact worked hours (1–7h) in roll call and cycle register.
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex items-center justify-between sm:col-span-2 py-1">
-                <div>
-                  <div className="text-xs font-bold text-stone-900">
-                    Enable Hours-based Days
-                  </div>
-                  <div className="text-[11px] text-stone-500 mt-0.5">
-                    Allows entering fractional worked days (e.g. 3h) in Roll Call and Cycle Register.
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setHoursAttendanceEnabled(!hoursAttendanceEnabled)}
-                  className="text-stone-700 hover:text-stone-900 transition cursor-pointer shrink-0"
-                >
-                  {hoursAttendanceEnabled ? (
-                    <ToggleRight className="h-8 w-8 text-emerald-600" />
-                  ) : (
-                    <ToggleLeft className="h-8 w-8 text-stone-300" />
-                  )}
-                </button>
-              </div>
-
-              <Field
-                label="Hour Step Setting"
-                hint="Granularity for quick chips and validation."
-              >
-                <Select
-                  value={hourStep}
-                  onChange={(e) => setHourStep(e.target.value)}
-                  disabled={!hoursAttendanceEnabled}
-                >
-                  <option value="30">30 minutes (0.5h step — Default)</option>
-                  <option value="60">60 minutes (1h step)</option>
-                </Select>
-              </Field>
-
-              <div className="sm:col-span-2 rounded-2xl border border-stone-200 bg-stone-50 p-3 text-[11px] leading-relaxed text-stone-600">
-                <strong className="text-stone-800">One Definition of a Day:</strong> Full day minutes = Shift Hours × 60 ({Number.parseFloat(otDivisor) || 8}h = {(Number.parseFloat(otDivisor) || 8) * 60} min). Pay for hours = Daily Rate × Worked Minutes ÷ Full Day Minutes. Half Day = {((Number.parseFloat(otDivisor) || 8) * 60) / 2} min (50% pay).
-              </div>
-            </div>
-          </Card>
-
-          {/* Business & Payroll Parameters Card */}
-          <Card className="p-5">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-600/15">
-                <ShieldCheck className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-base font-extrabold text-stone-900">
-                  Business & Payroll Parameters
-                </div>
-                <div className="text-xs text-stone-500">
-                  Printed on vouchers and statements, and used in wage calculations.
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Business / Company Name" className="sm:col-span-2">
-                <Input
-                  value={businessName}
-                  onChange={(event) => setBusinessName(event.target.value)}
-                  placeholder="e.g. Ramesh Textiles / હાજરી પગાર"
-                />
-              </Field>
-
-              <Field
-                label="First Cycle Start Date"
-                hint="Used only before the very first payout is closed."
-              >
-                <Input
-                  type="date"
-                  value={firstCycleStart}
-                  onChange={(event) => setFirstCycleStart(event.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="Full Day Shift / OT Divisor (Hours)"
-                hint="Hours per full day (OT and hours pay derive from this)."
-              >
-                <Input
-                  type="number"
-                  min="1"
-                  max="24"
-                  step="0.5"
-                  value={otDivisor}
-                  onChange={(event) => setOtDivisor(event.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="Language / ભાષા"
-                hint="Display language across attendance, payouts, and reports."
-                className="sm:col-span-2"
-              >
-                <Select
-                  value={language}
-                  onChange={(event) => setLangState(event.target.value as LanguageMode)}
-                >
-                  {LANGUAGES.map((lang) => (
-                    <option key={lang.value} value={lang.value}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              <Field
-                label="Expected Weekly Payout Day"
-                hint="Reminder day for weekly settlements (dates remain editable)."
-                className="sm:col-span-2"
-              >
-                <Select
-                  value={payoutWeekday}
-                  onChange={(event) => setPayoutWeekday(event.target.value)}
-                >
-                  {WEEKDAYS.map((day) => (
-                    <option key={day.value} value={day.value}>
-                      {day.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-          </Card>
-
-          <Card className="p-5">
-            <div className="mb-3 flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-700 ring-1 ring-amber-600/15">
-                <Info className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-base font-extrabold text-stone-900">
-                  How The Payroll Ledger Operates
-                </div>
-                <div className="text-xs text-stone-500">
-                  Quick rules and accounting conventions used in this system.
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3.5 text-xs leading-relaxed text-stone-600 divide-y divide-stone-100">
-              <p className="pt-2">
-                <strong className="text-stone-900">Attendance:</strong> Blank means unrecorded (no pay). Full day = 1.0 day rate, Half day = 0.5 day rate, Absent = 0. Worked hours (1–7h) credit exact worked minutes / full-day minutes. Friday is an off-day by default; work marked on Friday is paid.
-              </p>
-              <p className="pt-2">
-                <strong className="text-stone-900">Payout Cycles:</strong> A new cycle automatically begins the day after the last closed payout. Closing a payout generates official salary statements and carries forward any unpaid balances.
-              </p>
-              <p className="pt-2">
-                <strong className="text-stone-900">Upad (Advances):</strong> Advances are tracked in a dedicated ledger. Deductions during payout settlement reduce both salary due and outstanding upad. Cash repayments or write-offs directly reduce upad balance.
-              </p>
-              <p className="pt-2">
-                <strong className="text-stone-900">Staff Deactivation:</strong> Workers are never deleted to preserve historical audits. Deactivating an employee closes their active period while keeping all ledgers intact.
-              </p>
-            </div>
-          </Card>
+            <label className="text-[11px] font-bold text-stone-700">
+              {tx("Overtime Multiplier")}
+              <input
+                type="number"
+                min="0"
+                max="10"
+                step="0.1"
+                value={otMultiplier}
+                onChange={(e) => setOtMultiplier(e.target.value)}
+                className="mt-1 h-8 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+              />
+              <span className="mt-1 block text-[10px] text-stone-400">{tx("e.g. 1.0 (standard rate) or 1.5 (150%)")}</span>
+            </label>
+          </div>
         </div>
 
-        {/* Right column: Local database & Backup */}
-        <div className="space-y-5">
-          <Card className="p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
-                <Database className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-stone-900">Local Database</div>
-                <div className="text-xs text-stone-500">Embedded PocketBase engine</div>
-              </div>
-            </div>
+        {/* Company Identity */}
+        <div className="border-t border-stone-100 pt-3.5">
+          <div className="flex items-center gap-2 text-xs font-black text-stone-900">
+            <Building2 className="h-4 w-4 text-sky-700" />
+            {tx("Company Identity")}
+          </div>
+          <p className="mt-0.5 text-[11px] text-stone-400">{tx("Displayed on the sidebar header and payroll reports.")}</p>
 
-            <div className="mt-4 space-y-2.5 rounded-2xl bg-stone-50 p-3.5 text-xs text-stone-600">
-              <div className="flex justify-between">
-                <span>Active Workers:</span>
-                <span className="font-extrabold text-stone-900">{activeCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Total Employees:</span>
-                <span className="font-extrabold text-stone-900">
-                  {employeesQuery.data?.length ?? 0}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Closed Payouts:</span>
-                <span className="font-extrabold text-stone-900">
-                  {(runsQuery.data ?? []).filter(isRealPayoutRun).length}
-                </span>
-              </div>
-              <div className="flex justify-between border-t border-stone-200/80 pt-2 text-[11px] text-stone-500">
-                <span>Database Engine:</span>
-                <span className="font-mono font-bold text-stone-700">PocketBase v0.24</span>
-              </div>
-            </div>
-          </Card>
+          <label className="mt-3 block text-[11px] font-bold text-stone-700">
+            {tx("Company Name")}
+            <input
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder={tx("e.g. Kapil Products")}
+              className="mt-1 h-8 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+            />
+          </label>
+        </div>
 
-          <Card className="p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                <HardDrive className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm font-extrabold text-stone-900">Zero-Cloud Backup</div>
-                <div className="text-xs text-stone-500">100% Offline local storage</div>
-              </div>
-            </div>
+        <div className="border-t border-stone-100 pt-3.5">
+          <div className="flex items-center gap-2 text-xs font-black text-stone-900">
+            <Languages className="h-4 w-4 text-emerald-700" />
+            {tx("Interface Language")}
+          </div>
+          <label className="mt-3 block text-[11px] font-bold text-stone-700">
+            {tx("Language")}
+            <select
+              value={language}
+              onChange={(event) => setLocalLanguage(event.target.value as LanguageMode)}
+              className="mt-1 h-9 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-xs font-bold outline-none focus:border-emerald-600"
+            >
+              <option value="en">English</option>
+              <option value="gu">ગુજરાતી</option>
+            </select>
+          </label>
+          <p className="mt-1 text-[10px] text-stone-400">{tx("The interface language switches immediately after saving.")}</p>
+        </div>
 
-            <p className="mt-3 text-xs leading-relaxed text-stone-600">
-              All attendance records, salary statements, and advances reside directly on this PC
-              inside the local folder:
-            </p>
+        {/* Save Bar */}
+        <div className="flex items-center justify-between border-t border-stone-100 pt-3">
+          <div className="text-xs font-bold">
+            {saved && (
+              <span className="inline-flex items-center gap-1 text-emerald-700">
+                <Check className="h-3.5 w-3.5" /> {tx("Settings saved successfully.")}
+              </span>
+            )}
+            {mutation.isError && (
+              <span className="text-rose-700">{mutation.error.message}</span>
+            )}
+          </div>
 
-            <div className="mt-2.5 rounded-xl border border-stone-200 bg-stone-100 p-2 font-mono text-[11px] text-stone-800 break-all">
-              C:\Site_imp\attendance-web\pb\pb_data
-            </div>
-
-            <Button variant="secondary" size="sm" className="mt-3 w-full" onClick={copyPath}>
-              {copied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>Path Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" />
-                  <span>Copy Storage Path</span>
-                </>
-              )}
-            </Button>
-
-            <div className="mt-3 text-[11px] text-stone-500 leading-relaxed">
-              To backup, simply copy the <code className="text-stone-700 font-bold">pb_data</code>{' '}
-              folder to a pen drive or external hard disk.
-            </div>
-          </Card>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (query.data) {
+                  setShiftHours(String(query.data.shift_hours))
+                  setOtMultiplier(String(query.data.ot_multiplier))
+                  setCompanyName(query.data.company_name)
+                  setLocalLanguage(query.data.language)
+                }
+              }}
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50"
+            >
+              <RotateCcw className="h-3 w-3" />
+              {tx("Reset")}
+            </button>
+            <button
+              type="button"
+              disabled={!isValid || mutation.isPending}
+              onClick={() => mutation.mutate()}
+              className="inline-flex h-8 items-center rounded-lg bg-emerald-700 px-4 text-xs font-black text-white shadow-xs hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {mutation.isPending ? tx('Saving…') : tx('Save Settings')}
+            </button>
+          </div>
         </div>
       </div>
     </div>

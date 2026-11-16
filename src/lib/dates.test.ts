@@ -6,9 +6,6 @@ import {
   formatDateRange,
   daysBetweenInclusive,
   addDays,
-  startOfWeekSaturday,
-  isFriday,
-  isSaturday,
 } from './dates'
 
 describe('dates defensive utilities', () => {
@@ -51,11 +48,8 @@ describe('dates defensive utilities', () => {
     expect(daysBetweenInclusive('2026-10-01', '2026-10-07')).toBe(7)
   })
 
-  it('addDays and startOfWeekSaturday safely handle invalid input', () => {
+  it('addDays safely handles invalid input', () => {
     expect(addDays('', 5)).toBe('')
     expect(addDays('2026-10-01', 1)).toBe('2026-10-02')
-    expect(startOfWeekSaturday('')).toBe('')
-    expect(isFriday('')).toBe(false)
-    expect(isSaturday('')).toBe(false)
   })
 })

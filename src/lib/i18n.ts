@@ -1,256 +1,344 @@
 import { useEffect, useState } from 'react'
 
-/**
- * Language support for Gujarati, English, and Mixed labels.
- * Mixed is the default factory setting in Gujarat diamond / textile / manufacturing units.
- */
+export type LanguageMode = 'en' | 'gu'
+const STORAGE_KEY = 'kapil-products-language'
 
-export type LanguageMode = 'mixed' | 'gu' | 'en'
-
-const STORAGE_KEY = 'hajri_pagar_lang'
-
-export function getLanguage(): LanguageMode {
-  if (typeof window === 'undefined') return 'mixed'
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved === 'gu' || saved === 'en' || saved === 'mixed') return saved
-  return 'mixed'
+const GUJARATI: Record<string, string> = {
+  'Today\'s Roll Call': 'આજની હાજરી',
+  'Cycle Register': 'ચક્ર રજિસ્ટર',
+  'Select cycle': 'ચક્ર પસંદ કરો',
+  'Attendance & Payroll': 'હાજરી અને પગાર',
+  'Attendance tabs': 'હાજરી ટૅબ',
+  'Attendance': 'હાજરી',
+  'Workers': 'કામદારો',
+  'Worker': 'કામદાર',
+  'Report': 'રિપોર્ટ',
+  'Settings': 'સેટિંગ્સ',
+  'Upad': 'ઉપાડ',
+  'Upad Balance': 'ઉપાડ બાકી',
+  'Upad Deduct': 'ઉપાડ કપાત',
+  'Give Upad Advance': 'ઉપાડ આપો',
+  'Give Advance': 'રોકડ ઉપાડ આપો',
+  'Cash Return': 'રોકડ પરત',
+  'Record Cash Return': 'રોકડ પરત નોંધો',
+  'Custom': 'કસ્ટમ',
+  'Custom hours': 'કસ્ટમ કલાકો',
+  'Custom work hours': 'કસ્ટમ કામના કલાકો',
+  'Full': 'આખો દિવસ',
+  'Clear': 'સાફ કરો',
+  'Present': 'હાજર',
+  'Half': 'અડધો દિવસ',
+  'Absent': 'ગેરહાજર',
+  'Hours': 'કલાકો',
+  'hours worked': 'કલાક કામ',
+  'hour overtime': 'કલાક ઓવરટાઇમ',
+  'Overtime': 'ઓવરટાઇમ',
+  'Overtime blocked for absent days': 'ગેરહાજરીના દિવસે ઓવરટાઇમ દાખલ કરી શકાતો નથી',
+  'OT': 'ઓવરટાઇમ',
+  'Search': 'શોધો',
+  'Search workers': 'કામદારો શોધો',
+  'Search worker…': 'કામદાર શોધો…',
+  'No active workers match this search.': 'આ શોધ સાથે કોઈ સક્રિય કામદાર મળ્યો નથી.',
+  'Loading…': 'લોડ થઈ રહ્યું છે…',
+  'Loading attendance records…': 'હાજરીની વિગતો લોડ થઈ રહી છે…',
+  'Loading reports…': 'રિપોર્ટ લોડ થઈ રહ્યો છે…',
+  'Loading settings…': 'સેટિંગ્સ લોડ થઈ રહી છે…',
+  'Could not load reports from database.': 'ડેટાબેઝમાંથી રિપોર્ટ લોડ થઈ શક્યો નથી.',
+  'Could not load settings from database.': 'ડેટાબેઝમાંથી સેટિંગ્સ લોડ થઈ શકી નથી.',
+  'Open Cycle': 'ચાલુ ચક્ર',
+  'Closed Cycle': 'બંધ ચક્ર',
+  'Zoom in': 'મોટું કરો',
+  'Zoom out': 'નાનું કરો',
+  'Reset zoom': 'મૂળ માપ',
+  'Zoom out (smaller text & compact grid)': 'નાનું કરો (નાના અક્ષરો અને વધુ દિવસો)',
+  'Zoom in (larger text & cells)': 'મોટું કરો (મોટા અક્ષરો અને ખાના)',
+  'Collapse Days': 'દિવસો સંક્ષિપ્ત કરો',
+  'Expand Days': 'દિવસો વિસ્તારો',
+  'Total To Pay:': 'કુલ ચૂકવવાનું:',
+  'Paid:': 'ચૂકવ્યું:',
+  'Ready:': 'તૈયાર:',
+  'Earned': 'કમાણી',
+  'Adj (+/−)': 'ફેરફાર (+/−)',
+  'To Pay': 'ચૂકવવાનું',
+  'Days': 'દિવસો',
+  'Payout': 'ચૂકવણી',
+  'Payout (': 'ચૂકવણી (',
+  'Confirm payout': 'ચૂકવણીની પુષ્ટિ કરો',
+  'Cycle Days': 'ચક્રના દિવસો',
+  'Salary Carry': 'બાકી પગાર',
+  'Net To Pay': 'ચોખ્ખું ચૂકવવાનું',
+  'Carry': 'બાકી',
+  'Paid in full (Carry: ₹0)': 'પૂરી ચૂકવણી (બાકી: ₹0)',
+  'Untyped draft (open row)': 'રકમ દાખલ નથી (ખુલ્લી નોંધ)',
+  'Click a day to cycle P → H → A → Clear, or choose Custom hours.': 'દિવસ પસંદ કરીને P → H → A બદલો, અથવા કસ્ટમ કલાકો પસંદ કરો.',
+  'Choose P, H, A, Custom, or Clear for each day.': 'દરેક દિવસ માટે P, H, A, કસ્ટમ અથવા સાફ કરો પસંદ કરો.',
+  'Set custom work hours and overtime': 'કામના કલાકો અને ઓવરટાઇમ દાખલ કરો',
+  'Adjustment note': 'ફેરફારની નોંધ',
+  'Salary Adjustment (+/−)': 'પગાર ફેરફાર (+/−)',
+  'Upad in this Settlement': 'આ ચૂકવણીમાં ઉપાડ',
+  'Application Settings': 'એપ્લિકેશન સેટિંગ્સ',
+  'Workday & Overtime Calculation': 'કામના કલાકો અને ઓવરટાઇમની ગણતરી',
+  'Shift Hours (1 full day)': 'શિફ્ટના કલાકો (1 આખો દિવસ)',
+  'Overtime Multiplier': 'ઓવરટાઇમ ગુણક',
+  'Company Identity': 'કંપનીની ઓળખ',
+  'Company Name': 'કંપનીનું નામ',
+  'Interface Language': 'એપ્લિકેશનની ભાષા',
+  'Language': 'ભાષા',
+  'Save Settings': 'સેટિંગ્સ સાચવો',
+  'Saving…': 'સાચવી રહ્યું છે…',
+  'Reset': 'ફરી સેટ કરો',
+  'Cancel': 'રદ કરો',
+  'Search…': 'શોધો…',
+  'This Month Overview': 'આ મહિનાની ઝલક',
+  'Total Paid': 'કુલ ચૂકવ્યું',
+  'Total Returned': 'કુલ પરત',
+  'Select Payout Run:': 'ચૂકવણી ચક્ર પસંદ કરો:',
+  'Unlock This Payout': 'આ ચૂકવણી ખોલો',
+  'Worker Statements': 'કામદારના હિસાબ',
+  'Carry In': 'પહેલાનું બાકી',
+  'Adj (Salary)': 'ફેરફાર (પગાર)',
+  'Give Upad': 'ઉપાડ આપો',
+  'Upad Given': 'આપેલો ઉપાડ',
+  'Calculated': 'ગણતરી મુજબ',
+  'Paid': 'ચૂકવ્યું',
+  'Carry Out': 'આગળનું બાકી',
+  'Day-by-Day Attendance & Upad Cross Grid': 'દિવસવાર હાજરી અને ઉપાડનો હિસાબ',
+  'Attendance marks and Upad movements for settled days': 'ચૂકવાયેલા દિવસોની હાજરી અને ઉપાડની નોંધ',
+  'Unlock Closed Payout': 'બંધ ચૂકવણી ખોલો',
+  'Reason for unlocking (required)': 'ખોલવાનું કારણ (જરૂરી)',
+  'Confirm Unlock': 'ખોલવાની પુષ્ટિ કરો',
+  'Unlocking…': 'ખોલી રહ્યું છે…',
+  'No historical payout runs recorded yet. Settle an open cycle in the Attendance tab first.': 'જૂની ચૂકવણી નોંધાઈ નથી. પહેલાં હાજરીમાં ચાલુ ચક્રની ચૂકવણી કરો.',
+  'Recent Upad Movements': 'તાજેતરની ઉપાડની નોંધો',
+  'No ledger entries.': 'કોઈ નોંધ નથી.',
+  'Active': 'સક્રિય',
+  'Inactive': 'નિષ્ક્રિય',
+  'Add Worker': 'કામદાર ઉમેરો',
+  'Edit Worker': 'કામદારની વિગતો બદલો',
+  'Save Worker': 'કામદાર સાચવો',
+  'Daily Rate': 'દૈનિક દર',
+  'Opening Upad': 'શરૂઆતનો ઉપાડ',
+  'Opening Carry': 'શરૂઆતનું બાકી',
+  'Joined On': 'જોડાયા તારીખે',
+  'Status': 'સ્થિતિ',
+  'Filter': 'ફિલ્ટર',
+  'All workers': 'બધા કામદારો',
+  'Balance': 'બાકી રકમ',
+  'Date': 'તારીખ',
+  'Kind': 'પ્રકાર',
+  'Amount': 'રકમ',
+  'Note': 'નોંધ',
+  'Give': 'આપો',
+  'Deduct': 'કપાત',
+  'Repay': 'પરત',
+  'Save': 'સાચવો',
+  'Close': 'બંધ કરો',
+  'Apply': 'લાગુ કરો',
+  'No historical payout runs recorded yet.': 'જૂની ચૂકવણી નોંધાઈ નથી.',
+  '+ Upad': '+ ઉપાડ',
+  '/ day': '/ દિવસ',
+  ' days worked': ' દિવસ કામ કર્યું',
+  'Cash Returned This Month': 'આ મહિને પરત કરેલી રોકડ',
+  'Cash given': 'આપેલી રોકડ',
+  'Cash repayments': 'રોકડ પરત',
+  'Closed': 'બંધ',
+  'Action': 'કાર્ય',
+  'Amount (₹)': 'રકમ (₹)',
+  'Amount Paid to Worker (Typed)': 'કામદારને ચૂકવેલી રકમ',
+  'Are you sure you want to delete': 'શું તમે ખરેખર કાઢી નાખવા માંગો છો',
+  'Calculated target:': 'ગણતરી મુજબની રકમ:',
+  'Carry ₹0': 'બાકી ₹0',
+  'Current Outstanding': 'હાલની બાકી રકમ',
+  'Current:': 'હાલની રકમ:',
+  'Daily Rate (₹)': 'દૈનિક દર (₹)',
+  'Deducted from Upad': 'ઉપાડમાંથી કપાત',
+  'Direct cash returns': 'સીધી રોકડ પરત',
+  'Drawer cash': 'ડ્રોઅરની રોકડ',
+  'Drawer left:': 'ડ્રોઅરમાં બાકી:',
+  'Displayed on the sidebar header and payroll reports.': 'બાજુની પટ્ટી અને પગાર રિપોર્ટમાં દેખાશે.',
+  'Edit': 'ફેરફાર',
+  'Exceeds earned': 'કમાણી કરતાં વધુ',
+  'Exceeds': 'વધુ છે',
+  'Extra Upad': 'વધારાનો ઉપાડ',
+  'Full Name (required)': 'પૂરું નામ (જરૂરી)',
+  'Joined Date': 'જોડાવાની તારીખ',
+  'Latest Movement': 'છેલ્લી લેવડદેવડ',
+  'Loading Upad records…': 'ઉપાડની નોંધ લોડ થઈ રહી છે…',
+  'Loading worker roster…': 'કામદારોની યાદી લોડ થઈ રહી છે…',
+  'New Entry': 'નવી નોંધ',
+  'No Upad movements recorded yet.': 'હજુ ઉપાડની લેવડદેવડ નોંધાઈ નથી.',
+  'No entries': 'કોઈ નોંધ નથી',
+  'No transaction entries yet.': 'હજુ કોઈ લેવડદેવડ નોંધાઈ નથી.',
+  'No workers match this search.': 'આ શોધ સાથે કોઈ કામદાર મળ્યો નથી.',
+  'None': 'કંઈ નહીં',
+  'Note (optional)': 'નોંધ (વૈકલ્પિક)',
+  'Open Draft': 'ખુલ્લી નોંધ',
+  'Opening Balance': 'શરૂઆતની બાકી રકમ',
+  'Opening Salary Carry (₹, signed)': 'શરૂઆતનું પગાર બાકી (₹)',
+  'Opening Upad (₹)': 'શરૂઆતનો ઉપાડ (₹)',
+  'Owes money': 'રકમ બાકી છે',
+  'Off': 'રજા',
+  'Paid in full ✓': 'પૂરી ચૂકવણી ✓',
+  'Paid so far:': 'અત્યાર સુધી ચૂકવ્યું:',
+  'Pay Exact': 'આ રકમ ચૂકવો',
+  'Phone': 'ફોન',
+  'Rate / day': 'દૈનિક દર',
+  'Recent Ledger Entries': 'તાજેતરની ખાતાની નોંધો',
+  'Recent Movements': 'તાજેતરની લેવડદેવડ',
+  'Remaining Upad after payout:': 'ચૂકવણી પછીનો બાકી ઉપાડ:',
+  'added to the worker’s balance': 'કામદારના બાકી ઉપાડમાં ઉમેરાયું',
+  'Role': 'કામ',
+  'Save Hours': 'કલાકો સાચવો',
+  'Settings saved successfully.': 'સેટિંગ્સ સફળતાપૂર્વક સાચવી.',
+  'Salary balance owed': 'બાકી પગારની રકમ',
+  'Shift hours determine the hourly wage rate (daily rate / shift hours). Overtime multiplier applies to OT hours.': 'શિફ્ટના કલાકોથી કલાકનો પગાર નક્કી થાય છે. ઓવરટાઇમ ગુણક વધારાના કલાકો પર લાગુ પડે છે.',
+  'Signed Carry': 'બાકી પગાર',
+  'Standard factory shift (e.g. 8 or 12 hours)': 'સામાન્ય શિફ્ટ (જેમ કે 8 કે 12 કલાક)',
+  'The interface language switches immediately after saving.': 'સાચવ્યા પછી એપ્લિકેશનની ભાષા બદલાશે.',
+  'Unpaid salary carry': 'આગળ લઈ જવાનો બાકી પગાર',
+  'This Cycle': 'આ ચક્ર',
+  'Today': 'આજે',
+  'Total Net Payout': 'કુલ ચોખ્ખી ચૂકવણી',
+  'Total Upad given': 'કુલ આપેલો ઉપાડ',
+  'Total balance owed': 'કુલ બાકી રકમ',
+  'Transaction History': 'લેવડદેવડનો ઇતિહાસ',
+  'Unlock Cycle': 'ચક્ર ખોલો',
+  'Unlock Payout Batch': 'ચૂકવણી ચક્ર ખોલો',
+  'Upad Given This Month': 'આ મહિને આપેલો ઉપાડ',
+  'Who took how much, and on which day': 'કયા કામદારે કયા દિવસે કેટલી રકમ લીધી',
+  'Workers in this Batch': 'આ ચૂકવણીમાં કામદારો',
+  'Workers with Balance': 'બાકી ધરાવતા કામદારો',
+  'Workers with an Upad balance': 'ઉપાડ બાકી ધરાવતા કામદારો',
+  'worked': 'કામ કર્યું',
+  'worked.': 'કામ કર્યું.',
+  'payout runs': 'ચૂકવણી ચક્ર',
+  'settled)': 'ચૂકવાયું)',
+  'settled': 'ચૂકવાયા',
+  'statements': 'હિસાબ',
+  'unpaid salary forward to next cycle': 'ન ચૂકવાયેલ પગાર આગળના ચક્રમાં ઉમેરો',
+  'worker statements.': 'કામદારના હિસાબ.',
+  '✓ Done': '✓ પૂર્ણ',
+  'Quick Upad Action': 'ઝડપી ઉપાડ નોંધ',
+  'Unlocking this payout will void its financial statements, recover employee attendance days, and restore prior cycle boundaries. A reason is strictly required.': 'આ ચૂકવણી ખોલવાથી તેનો હિસાબ રદ થશે, હાજરીના દિવસો પાછા ખુલશે અને ચક્રની જૂની તારીખો પુનઃસ્થાપિત થશે. કારણ આપવું જરૂરી છે.',
+  'Owing': 'બાકી છે',
+  'Zero': 'શૂન્ય',
+  'All': 'બધા',
+  'Ledger': 'ખાતું',
+  'Advance': 'ઉપાડ',
+  'Cash Repay': 'રોકડ પરત',
+  'active': 'સક્રિય',
+  'inactive': 'નિષ્ક્રિય',
+  'all': 'બધા',
+  'Operator': 'ઓપરેટર',
+  'Tailor': 'દરજી',
+  'Master': 'માસ્ટર',
+  'Helper': 'મદદનીશ',
+  'give': 'આપ્યું',
+  'deduct': 'કપાત',
+  'repay': 'પરત કર્યું',
+  'Click to switch to': 'બદલવા ક્લિક કરો:',
+  'Adjustment': 'પગાર ફેરફાર',
+  'Give Advance (+)': 'ઉપાડ આપો (+)',
+  'Cash Return (−)': 'રોકડ પરત (−)',
+  'Advance given': 'આપેલો ઉપાડ',
+  'Cash returned': 'પરત કરેલી રોકડ',
+  'Bal': 'બાકી',
+  'Give an advance to': 'આ કામદારને ઉપાડ આપો:',
+  'Record cash returned by': 'આ કામદારની પરત રોકડ નોંધો:',
+  'on': 'તારીખે',
+  'Previous day': 'પહેલો દિવસ',
+  'Next day': 'આગળનો દિવસ',
+  'Roll call date': 'હાજરીની તારીખ',
+  'Workers by status': 'સ્થિતિ મુજબ કામદારો',
+  'Search workers by name or role…': 'નામ અથવા કામથી કામદાર શોધો…',
+  'Could not load worker data from database.': 'ડેટાબેઝમાંથી કામદારોની વિગતો લોડ થઈ શકી નથી.',
+  'Could not load Upad ledger from PocketBase.': 'PocketBase માંથી ઉપાડનો હિસાબ લોડ થઈ શક્યો નથી.',
+  'of': 'માંથી',
+  'marked': 'ચિહ્નિત',
+  'ready)': 'તૈયાર)',
+  'Settlement & Payout': 'ચૂકવણીનો હિસાબ',
+  'Attendance Days': 'હાજરીના દિવસો',
+  'Upad Ledger & Actions': 'ઉપાડનો હિસાબ અને નોંધ',
+  'Hours Worked (regular)': 'કામના કલાકો',
+  'e.g. 4 for half day, 8 for full day': 'જેમ કે અડધા દિવસ માટે 4, આખા દિવસ માટે 8',
+  'Overtime (hours)': 'ઓવરટાઇમ (કલાક)',
+  'Additional OT hours worked': 'વધારાના ઓવરટાઇમ કલાકો',
+  'Confirm Payout': 'ચૂકવણીની પુષ્ટિ કરો',
+  'Only completed (done) rows will be finalized into this payout batch. Open rows stay pending.': 'માત્ર પૂર્ણ કરેલી હરોળની ચૂકવણી થશે. બાકી હરોળ ખુલ્લી રહેશે.',
+  'To pay:': 'ચૂકવવાનું:',
+  'rem:': 'બાકી:',
+  'Carry +': 'બાકી +',
+  'Carry −': 'બાકી −',
+  'Global payroll formulas and business details. Changes recalculate all open cycles immediately without affecting historical statements.': 'પગારની ગણતરી અને કંપનીની વિગતો. ફેરફારથી ચાલુ ચક્ર ફરી ગણાશે; જૂના હિસાબ બદલાશે નહીં.',
+  'e.g. 1.0 (standard rate) or 1.5 (150%)': 'જેમ કે 1.0 (સામાન્ય દર) અથવા 1.5 (150%)',
+  'e.g. Kapil Products': 'જેમ કે Kapil Products',
+  'Search name, role, phone…': 'નામ, કામ કે ફોન શોધો…',
+  'Add New Worker': 'નવો કામદાર ઉમેરો',
+  'Worker name is required.': 'કામદારનું નામ જરૂરી છે.',
+  'Delete worker (only permitted with 0 attendance and 0 upad)': 'કામદાર કાઢો (હાજરી અને ઉપાડ નોંધ ન હોય ત્યારે જ)',
+  'Record Upad Transaction': 'ઉપાડની નોંધ કરો',
+  'Record Entry': 'નોંધ સાચવો',
+  'Save Transaction': 'લેવડદેવડ સાચવો',
+  'Delete': 'કાઢો',
+  'Upad Ledger': 'ઉપાડનો હિસાબ',
+  'Max available:': 'મહત્તમ ઉપલબ્ધ:',
+  'Reverses this payout batch, voids statements, restores employee balances, and reopens attendance for editing.': 'આ ચૂકવણી રદ કરી હિસાબ અને બેલેન્સ પાછાં લાવશે તથા હાજરી ફરી ખોલશે.',
+  'Payout settlement': 'ચૂકવણીનો હિસાબ',
+  'Add adjustment note': 'ફેરફારની નોંધ ઉમેરો',
+  'Positive for bonus/add, negative for penalty/deduct': 'વધારાની રકમ માટે ધન, કપાત માટે ઋણ રકમ દાખલ કરો',
+  'Deduct Upad from Salary (₹)': 'પગારથી ઉપાડ કપાત (₹)',
+  'Adjustment (₹)': 'પગાર ફેરફાર (₹)',
+  'Adjustment Note': 'ફેરફારની નોંધ',
+  'Reason for Unlocking (required for audit log)': 'ખોલવાનું કારણ (ઓડિટ માટે જરૂરી)',
+  'Add a short note…': 'ટૂંકી નોંધ ઉમેરો…',
+  'e.g. Festival bonus, late arrival': 'જેમ કે તહેવાર બોનસ અથવા મોડું આવવું',
+  'e.g. Correcting overtime entry for Ramesh or adjusting daily rate': 'જેમ કે ઓવરટાઇમ અથવા દૈનિક દરમાં સુધારો',
+  'Custom Hours & Overtime': 'કસ્ટમ કલાકો અને ઓવરટાઇમ',
+  'Record exact work duration for': 'કામનો ચોક્કસ સમય નોંધો:',
+  'Record an advance or return for': 'આ કામદારનો ઉપાડ અથવા પરત રકમ નોંધો:',
+  '? This worker has no recorded attendance or Upad transactions.': '? આ કામદારની હાજરી કે ઉપાડની નોંધ નથી.',
+  'Closed cycle is read-only. This payout included': 'બંધ ચક્રમાં ફેરફાર કરી શકાતો નથી. આ ચૂકવણીમાં',
+  'Could not connect to the local PocketBase database (port 8091). Verify the server is running.': 'સ્થાનિક PocketBase ડેટાબેઝ સાથે જોડાણ થઈ શક્યું નથી. સર્વર ચાલુ છે કે નહીં તપાસો.',
+  'Opening:': 'શરૂઆતની બાકી:',
+  'Upad:': 'ઉપાડ:',
+  'days worked': 'દિવસ કામ કર્યું',
+  'e.g. Festival advance, emergency cash': 'જેમ કે તહેવાર માટે ઉપાડ અથવા તાત્કાલિક રોકડ',
+  'e.g. Festival advance': 'જેમ કે તહેવારનો ઉપાડ',
+  'e.g. Ramesh Patel': 'જેમ કે રમેશ પટેલ',
+  'Give Upad (₹)': 'ઉપાડ આપો (₹)',
+  'Closed cycle': 'બંધ ચક્ર',
 }
 
-export function setLanguage(lang: LanguageMode): void {
-  if (typeof window === 'undefined') return
-  localStorage.setItem(STORAGE_KEY, lang)
+export function tx(text: string, language: LanguageMode = getLanguage()): string {
+  return language === 'gu' ? (GUJARATI[text] ?? text) : text
+}
+
+export function getLanguage(): LanguageMode {
+  try { return localStorage.getItem(STORAGE_KEY) === 'gu' ? 'gu' : 'en' }
+  catch { return 'en' }
+}
+
+export function hasLanguagePreference(): boolean {
+  try { return localStorage.getItem(STORAGE_KEY) !== null }
+  catch { return false }
+}
+
+export function setLanguage(language: LanguageMode): void {
+  try { localStorage.setItem(STORAGE_KEY, language) } catch { /* Keep the current in-memory selection. */ }
+  document.documentElement.lang = language
   window.dispatchEvent(new Event('languagechange'))
 }
 
-export function useLanguage(): [LanguageMode, (l: LanguageMode) => void] {
-  const [lang, setLangState] = useState<LanguageMode>(getLanguage)
+export function useLanguage(): LanguageMode {
+  const [language, setLocalLanguage] = useState<LanguageMode>(() => getLanguage())
   useEffect(() => {
-    const handler = () => setLangState(getLanguage())
-    window.addEventListener('languagechange', handler)
-    window.addEventListener('storage', handler)
+    const sync = () => setLocalLanguage(getLanguage())
+    window.addEventListener('languagechange', sync)
+    window.addEventListener('storage', sync)
     return () => {
-      window.removeEventListener('languagechange', handler)
-      window.removeEventListener('storage', handler)
+      window.removeEventListener('languagechange', sync)
+      window.removeEventListener('storage', sync)
     }
   }, [])
-  const setLang = (newLang: LanguageMode) => {
-    setLanguage(newLang)
-    setLangState(newLang)
-  }
-  return [lang, setLang]
+  return language
 }
-
-export const STRINGS = {
-  // Navigation & App headers
-  app_name: {
-    mixed: 'હાજરી પગાર (Attendance & Payroll)',
-    gu: 'હાજરી પગાર',
-    en: 'Hajri Pagar Payroll',
-  },
-  nav_attendance: {
-    mixed: 'હાજરી (Attendance)',
-    gu: 'હાજરી',
-    en: 'Attendance',
-  },
-  nav_payout: {
-    mixed: 'પગાર ચૂકવણી (Issue Payout)',
-    gu: 'પગાર ચૂકવણી',
-    en: 'Issue Payout',
-  },
-  nav_employees: {
-    mixed: 'કારીગરો (Workers)',
-    gu: 'કારીગરો',
-    en: 'Workers',
-  },
-  nav_upad: {
-    mixed: 'ઉપાડ (Upad)',
-    gu: 'ઉપાડ ખાતું',
-    en: 'Advances (Upad)',
-  },
-  nav_reports: {
-    mixed: 'રિપોર્ટ્સ (Reports)',
-    gu: 'હિસાબ ચોપડો',
-    en: 'Reports & Statements',
-  },
-  nav_settings: {
-    mixed: 'સેટિંગ્સ (Settings)',
-    gu: 'સેટિંગ્સ',
-    en: 'Settings',
-  },
-
-  // Attendance & Roll Call
-  roll_call: {
-    mixed: "આજની હાજરી (Today's Roll Call)",
-    gu: 'આજની હાજરી',
-    en: "Today's Roll Call",
-  },
-  attendance_register: {
-    mixed: 'હાજરી પત્રક (Cycle Register)',
-    gu: 'હાજરી પત્રક',
-    en: 'Attendance Register',
-  },
-  present: {
-    mixed: 'હાજર (Present)',
-    gu: 'હાજર',
-    en: 'Present',
-  },
-  half_day: {
-    mixed: 'અડધો દિવસ (Half)',
-    gu: 'અડધો દિવસ',
-    en: 'Half Day',
-  },
-  absent: {
-    mixed: 'ગેરહાજર (Absent)',
-    gu: 'ગેરહાજર',
-    en: 'Absent',
-  },
-  overtime: {
-    mixed: 'ઓવરટાઇમ (OT)',
-    gu: 'ઓવરટાઇમ',
-    en: 'Overtime',
-  },
-  mark_all_present: {
-    mixed: 'બધાને હાજર કરો (Mark All Present)',
-    gu: 'બધાને હાજર કરો',
-    en: 'Mark All Present',
-  },
-  clear_today: {
-    mixed: 'આજની હાજરી ભૂંસો (Clear Today)',
-    gu: 'આજની હાજરી ભૂંસો',
-    en: 'Clear Today',
-  },
-  unmarked: {
-    mixed: 'બાકી હાજરી (Unmarked)',
-    gu: 'બાકી હાજરી',
-    en: 'Unmarked',
-  },
-  step1_title: {
-    mixed: 'પગલું ૧: હાજરી ચકાસો (Step 1: Check Attendance)',
-    gu: 'પગલું ૧: હાજરી ચકાસો',
-    en: 'Step 1: Check Attendance',
-  },
-  step2_title: {
-    mixed: 'પગલું ૨: પગાર ચૂકવણી (Step 2: Issue Payout)',
-    gu: 'પગલું ૨: પગાર ચૂકવણી',
-    en: 'Step 2: Issue Payout',
-  },
-
-  // Upad buckets
-  chalu_upad: {
-    mixed: 'ચાલુ ઉપાડ (Chalu Upad)',
-    gu: 'ચાલુ ઉપાડ',
-    en: 'Chalu Upad (Small)',
-  },
-  moto_upad: {
-    mixed: 'મોટો ઉપાડ (Main Upad)',
-    gu: 'મોટો ઉપાડ',
-    en: 'Main Upad (Large)',
-  },
-  upad_recovery: {
-    mixed: 'ઉપાડ કપાત (Upad Recovery)',
-    gu: 'ઉપાડ કપાત',
-    en: 'Upad Recovery',
-  },
-  cash_return: {
-    mixed: 'જમા રોકડ (Cash Return)',
-    gu: 'જમા રોકડ',
-    en: 'Cash Return',
-  },
-  write_off: {
-    mixed: 'માંડવાળ (Write-off)',
-    gu: 'માંડવાળ',
-    en: 'Write-off',
-  },
-
-  // Salary & Payout
-  salary_earned: {
-    mixed: 'કમાયેલ પગાર (Earned Salary)',
-    gu: 'કમાયેલ પગાર',
-    en: 'Earned Salary',
-  },
-  carry_forward: {
-    mixed: 'જૂની બાકી (Carry in)',
-    gu: 'જૂની બાકી',
-    en: 'Carry Forward',
-  },
-  bonus: {
-    mixed: 'બોનસ (Bonus)',
-    gu: 'બોનસ',
-    en: 'Bonus',
-  },
-  fine: {
-    mixed: 'કપાત/દંડ (Fine/Deduction)',
-    gu: 'કપાત / દંડ',
-    en: 'Deduction',
-  },
-  total_due: {
-    mixed: 'કુલ લેણી રકમ (Total Due)',
-    gu: 'કુલ લેણી રકમ',
-    en: 'Total Due',
-  },
-  owed_now: {
-    mixed: 'હાલ લેણી રકમ (Owed Now)',
-    gu: 'હાલ લેણી રકમ',
-    en: 'Owed Now',
-  },
-  payable: {
-    mixed: 'ચૂકવવાપાત્ર (Payable)',
-    gu: 'ચૂકવવાપાત્ર',
-    en: 'Net Payable',
-  },
-  cash_to_hand: {
-    mixed: 'હાથમાં આપવાની રોકડ (Cash to Hand Over)',
-    gu: 'હાથમાં આપવાની રોકડ',
-    en: 'Cash to Hand Over',
-  },
-  cash_needed_today: {
-    mixed: 'આજે જોઈતી કુલ રોકડ (Cash Needed Today)',
-    gu: 'આજે જોઈતી કુલ રોકડ',
-    en: 'Cash Needed Today',
-  },
-  pay_worker: {
-    mixed: 'પગાર ચૂકવો (Pay)',
-    gu: 'પગાર ચૂકવો',
-    en: 'Pay',
-  },
-  pay_now: {
-    mixed: 'હમણાં ચૂકવો (Pay Now)',
-    gu: 'હમણાં ચૂકવો',
-    en: 'Pay Now',
-  },
-  paid_done: {
-    mixed: 'ચૂકવાઈ ગયું (Paid ✓)',
-    gu: 'ચૂકવાઈ ગયું ✓',
-    en: 'Paid ✓',
-  },
-  undo: {
-    mixed: 'પાછું ખેંચો (Undo)',
-    gu: 'પાછું ખેંચો',
-    en: 'Undo',
-  },
-  settled: {
-    mixed: 'હિસાબ પૂર્ણ (Settled)',
-    gu: 'હિસાબ પૂર્ણ',
-    en: 'Settled',
-  },
-  final_settlement: {
-    mixed: 'આખરી હિસાબ (Final Settlement)',
-    gu: 'આખરી હિસાબ',
-    en: 'Final Settlement',
-  },
-  denominations: {
-    mixed: 'નોટોની ગણતરી (Denominations)',
-    gu: 'નોટોની ગણતરી',
-    en: 'Denomination Breakdown',
-  },
-} as const
-
-export type TranslationKey = keyof typeof STRINGS
-
-export function t(key: TranslationKey, lang?: LanguageMode): string {
-  const active = lang ?? getLanguage()
-  const entry = STRINGS[key]
-  if (!entry) return key
-  return entry[active] ?? entry.mixed
-}
-

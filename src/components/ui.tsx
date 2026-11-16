@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useRef,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -8,7 +7,10 @@ import {
   type TextareaHTMLAttributes,
 } from 'react'
 import clsx from 'clsx'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { AlertTriangle, Loader2, Search, X } from 'lucide-react'
+
+export { DialogPrimitive }
 
 export function cn(...values: Array<string | false | null | undefined>) {
   return clsx(values)
@@ -34,7 +36,7 @@ export function Button({
       {...props}
       disabled={props.disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-xl font-bold tracking-tight transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 select-none',
+        'inline-flex items-center justify-center gap-2 rounded-xl font-bold tracking-tight transition-transform duration-150 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 select-none cursor-pointer',
         size === 'sm' && 'h-8 px-3 text-xs',
         size === 'md' && 'h-9.5 px-4 text-xs sm:text-sm',
         size === 'lg' && 'h-11 px-5 text-sm',
@@ -137,9 +139,9 @@ export function PageHeader({
   return (
     <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
-        {eyebrow && <div className="text-[11px] font-bold uppercase tracking-wider text-emerald-800/80 mb-0.5">{eyebrow}</div>}
-        <h1 className="text-2xl font-black tracking-tight text-stone-900 sm:text-3xl">{title}</h1>
-        {description && <p className="mt-0.5 text-xs text-stone-500 max-w-2xl font-medium leading-relaxed">{description}</p>}
+        {eyebrow && <div className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800/80 mb-0.5">{eyebrow}</div>}
+        <h1 className="text-2xl font-black tracking-tight text-stone-900 sm:text-3xl leading-tight [text-wrap:balance]">{title}</h1>
+        {description && <p className="mt-0.5 text-xs sm:text-sm text-stone-500 max-w-2xl font-medium leading-relaxed [text-wrap:pretty]">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -168,7 +170,7 @@ export function Stat({
           </div>
           <div
             className={cn(
-              'mt-1 text-2xl font-black tracking-tight tabular-nums',
+              'mt-1.5 text-2xl sm:text-[26px] font-black tracking-tight tabular-nums leading-none',
               tone === 'default' && 'text-stone-900',
               tone === 'green' && 'text-emerald-800',
               tone === 'teal' && 'text-teal-800',
@@ -179,7 +181,7 @@ export function Stat({
           >
             {value}
           </div>
-          {hint && <div className="mt-1 text-[11px] font-medium text-stone-500 truncate">{hint}</div>}
+          {hint && <div className="mt-1.5 text-[11px] font-medium text-stone-500 truncate">{hint}</div>}
         </div>
         {icon && (
           <div
@@ -223,8 +225,8 @@ export function EmptyState({
           {icon}
         </div>
       )}
-      <div className="text-sm font-extrabold text-stone-900">{title}</div>
-      {description && <p className="mt-1 max-w-sm text-xs text-stone-500 leading-relaxed font-medium">{description}</p>}
+      <div className="text-sm sm:text-base font-extrabold text-stone-900 [text-wrap:balance]">{title}</div>
+      {description && <p className="mt-1 max-w-sm text-xs text-stone-500 leading-relaxed font-medium [text-wrap:pretty]">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   )
@@ -379,75 +381,69 @@ export function Modal({
 }: {
   open: boolean
   onClose: () => void
-  title: string
-  description?: string
+  title?: ReactNode
+  description?: ReactNode
   children: ReactNode
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
   printable?: boolean
 }) {
-  useEffect(() => {
-    if (!open) return
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handler)
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', handler)
-      document.body.style.overflow = previous
-    }
-  }, [open, onClose])
-
-  if (!open) return null
-
   return (
-    <div
-      className={cn(
-        'fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4',
-        !printable && 'no-print',
-        printable && 'print:static print:inset-auto print:z-auto print:block print:p-0 print:m-0 print:bg-white',
-      )}
-    >
-      <button
-        className="absolute inset-0 bg-stone-950/45 backdrop-blur-[2px] transition-opacity no-print"
-        onClick={onClose}
-        aria-label="Close dialog"
-      />
-      <div
-        className={cn(
-          'relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-stone-200 bg-white shadow-2xl sm:rounded-2xl',
-          size === 'sm' && 'sm:max-w-md',
-          size === 'md' && 'sm:max-w-xl',
-          size === 'lg' && 'sm:max-w-3xl',
-          size === 'xl' && 'sm:max-w-5xl',
-          printable && 'print:max-h-none print:w-full print:max-w-none print:border-none print:shadow-none print:rounded-none print:bg-white',
-        )}
-      >
-        <div className="flex items-start justify-between gap-4 border-b border-stone-200/80 px-6 py-4 bg-stone-50/50 no-print">
-          <div>
-            <h2 className="text-lg font-bold tracking-tight text-stone-900 sm:text-xl">{title}</h2>
-            {description && <p className="mt-1 text-xs sm:text-sm text-stone-600 font-medium leading-normal">{description}</p>}
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-200/60 hover:text-stone-700 transition"
-            aria-label="Close"
+    <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay
+          className={cn(
+            'fixed inset-0 z-50 bg-stone-950/45 backdrop-blur-[2px] transition-opacity duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            !printable && 'no-print',
+          )}
+        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <DialogPrimitive.Content
+            className={cn(
+              'relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-2xl transition-all duration-150 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 my-auto',
+              size === 'sm' && 'max-w-md',
+              size === 'md' && 'max-w-xl',
+              size === 'lg' && 'max-w-3xl',
+              size === 'xl' && 'max-w-5xl',
+              printable && 'print:max-h-none print:w-full print:max-w-none print:border-none print:shadow-none print:rounded-none print:bg-white',
+            )}
           >
-            <X className="h-4 w-4" />
-          </button>
+            {(title || description) ? (
+              <div className="flex items-start justify-between gap-4 border-b border-stone-200/80 px-6 py-4 bg-stone-50/70 no-print">
+                <div className="min-w-0 flex-1">
+                  {title && (
+                    <DialogPrimitive.Title className="text-base font-bold tracking-tight text-stone-900 sm:text-lg [text-wrap:balance]">
+                      {title}
+                    </DialogPrimitive.Title>
+                  )}
+                  {description && (
+                    <DialogPrimitive.Description className="mt-0.5 text-xs text-stone-500 font-medium leading-normal [text-wrap:pretty]">
+                      {description}
+                    </DialogPrimitive.Description>
+                  )}
+                </div>
+                <DialogPrimitive.Close
+                  className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-200/60 hover:text-stone-700 transition cursor-pointer"
+                  aria-label="Close dialog"
+                >
+                  <X className="h-4 w-4" />
+                </DialogPrimitive.Close>
+              </div>
+            ) : (
+              <DialogPrimitive.Title className="sr-only">Dialog</DialogPrimitive.Title>
+            )}
+            <div className={cn('overflow-y-auto px-5 py-4 sm:px-6 overscroll-contain', printable && 'print:overflow-visible print:p-0 print:m-0')}>
+              {children}
+            </div>
+            {footer && (
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-stone-100 bg-stone-50/80 px-5 py-3 sm:px-6 no-print">
+                {footer}
+              </div>
+            )}
+          </DialogPrimitive.Content>
         </div>
-        <div className={cn('overflow-y-auto px-5 py-4 sm:px-6', printable && 'print:overflow-visible print:p-0 print:m-0')}>
-          {children}
-        </div>
-        {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-stone-100 bg-stone-50/80 px-5 py-3 sm:px-6 no-print">
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   )
 }
 

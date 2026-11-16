@@ -1,8 +1,8 @@
+import { getLanguage } from './i18n'
+
 const DAY_MS = 86_400_000
 
-export const WEEKDAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 export const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-export const WEEKDAY_GU = ['રવિ', 'સોમ', 'મંગળ', 'બુધ', 'ગુરુ', 'શુક્ર', 'શનિ']
 export const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 export function dateKey(input: string | Date): string {
@@ -29,31 +29,11 @@ export function addDays(key: string, days: number): string {
   return dateKey(date)
 }
 
-export function startOfWeekSaturday(key: string): string {
-  const date = parseDate(key)
-  if (isNaN(date.getTime())) return key || ''
-  const back = (date.getDay() + 1) % 7
-  return addDays(key, -back)
-}
-
-export function weekDates(startKey: string): string[] {
-  return Array.from({ length: 7 }, (_, index) => addDays(startKey, index))
-}
-
-export function isFriday(key: string): boolean {
-  const date = parseDate(key)
-  return isNaN(date.getTime()) ? false : date.getDay() === 5
-}
-
-export function isSaturday(key: string): boolean {
-  const date = parseDate(key)
-  return isNaN(date.getTime()) ? false : date.getDay() === 6
-}
-
 export function formatDateShort(key: string | undefined | null): string {
   if (!key) return '—'
   const date = parseDate(key)
   if (isNaN(date.getTime())) return typeof key === 'string' ? key.slice(0, 10) || '—' : '—'
+  if (getLanguage() === 'gu') return new Intl.DateTimeFormat('gu-IN', { day: 'numeric', month: 'short' }).format(date)
   return `${date.getDate()} ${MONTH_SHORT[date.getMonth()]}`
 }
 
@@ -61,6 +41,7 @@ export function formatDateLong(key: string | undefined | null): string {
   if (!key) return '—'
   const date = parseDate(key)
   if (isNaN(date.getTime())) return typeof key === 'string' ? key.slice(0, 10) || '—' : '—'
+  if (getLanguage() === 'gu') return new Intl.DateTimeFormat('gu-IN', { day: 'numeric', month: 'short', year: 'numeric' }).format(date)
   return `${date.getDate()} ${MONTH_SHORT[date.getMonth()]} ${date.getFullYear()}`
 }
 
@@ -81,38 +62,8 @@ export function todayKey(): string {
   return dateKey(new Date())
 }
 
-export function weekdayName(key: string): string {
-  return WEEKDAY_LONG[parseDate(key).getDay()]
-}
-
 export function weekdayShort(key: string): string {
-  return WEEKDAY_SHORT[parseDate(key).getDay()]
-}
-
-export function weekdayGu(key: string): string {
-  return WEEKDAY_GU[parseDate(key).getDay()]
-}
-
-export function monthKey(key: string): string {
-  return key.slice(0, 7)
-}
-
-export function monthLabel(key: string): string {
-  const date = parseDate(`${key}-01`)
-  return `${MONTH_SHORT[date.getMonth()]} ${date.getFullYear()}`
-}
-
-export function startOfMonth(key: string): string {
-  return `${key.slice(0, 7)}-01`
-}
-
-export function endOfMonth(key: string): string {
-  const date = parseDate(`${key.slice(0, 7)}-01`)
-  date.setMonth(date.getMonth() + 1)
-  date.setDate(0)
-  return dateKey(date)
-}
-
-export function unixSortKey(key: string): number {
-  return parseDate(key).getTime()
+  const date = parseDate(key)
+  if (getLanguage() === 'gu') return new Intl.DateTimeFormat('gu-IN', { weekday: 'short' }).format(date)
+  return WEEKDAY_SHORT[date.getDay()]
 }

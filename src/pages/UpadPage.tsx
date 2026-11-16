@@ -1,503 +1,613 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import {
-  ArrowRight,
-  Coins,
-  HandCoins,
-  Plus,
-  RotateCcw,
-  Search,
-  TrendingDown,
-  TrendingUp,
-  Users,
-} from 'lucide-react'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowDownLeft, ArrowUpRight, Coins, History, Plus, Search, Users, X } from 'lucide-react'
 import clsx from 'clsx'
-import { getSettings, listEmployees, listUpadEntries } from '../lib/api'
-import { useUpadBuckets } from '../lib/cycle'
-import { SettleModal, type SettleTarget } from '../components/SettleModal'
-import { dateKey, daysBetweenInclusive, formatDateShort, monthKey, todayKey } from '../lib/dates'
-import { formatMoney } from '../lib/money'
-import { upadBreakdownForEmployee } from '../lib/payroll'
-import type { UpadKind } from '../lib/types'
-import { UpadModal } from '../components/UpadModal'
-import {
-  Avatar,
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  PageHeader,
-  SearchInput,
-  Select,
-  Spinner,
-  Stat,
-  Tabs,
-} from '../components/ui'
+import { addUpadEntry, loadAppData } from '../lib/attendance-service'
+import { calcUpadBalance, formatMoney, parseMoneyInput } from '../lib/attendance-calc'
+import { dateKey, formatDateShort, todayKey } from '../lib/dates'
+import type { Employee, UpadEntry } from '../lib/types'
+import { Avatar, Modal } from '../components/ui'
+import { tx, useLanguage } from '../lib/i18n'
 
-const KIND_LABEL: Record<UpadKind, string> = {
-  given: 'Advance Given',
-  recovery: 'Salary Deducted',
-  returned: 'Cash Returned',
-  writeoff: 'Written Off',
-}
+export default function UpadPage() {
+  useLanguage()
+  const qc = useQueryClient()
+  const query = useQuery({ queryKey: ['attendance-data'], queryFn: loadAppData })
 
-export default function UpadPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const [upadOpen, setUpadOpen] = useState(false)
-  const [modalEmployeeId, setModalEmployeeId] = useState<string | undefined>()
-  const [modalKind, setModalKind] = useState<UpadKind>('given')
   const [search, setSearch] = useState('')
-  const [kindFilter, setKindFilter] = useState<'all' | UpadKind>('all')
+  const [filter, setFilter] = useState<'all' | 'owing' | 'clear'>('all')
+  const [selectedWorkerId, setSelectedWorkerId] = useState<string | null>(null)
+  const [quickModalWorkerId, setQuickModalWorkerId] = useState<string | null>(null)
 
-  const employeesQuery = useQuery({ queryKey: ['employees'], queryFn: () => listEmployees(true) })
-  const upadQuery = useQuery({ queryKey: ['upad'], queryFn: () => listUpadEntries() })
-  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
-  const upadConfig = useUpadBuckets(settingsQuery.data)
-  const isChaluOn = upadConfig.isChaluOn
-  const isMotoOn = upadConfig.isMotoOn
-  const [settleTarget, setSettleTarget] = useState<SettleTarget | null>(null)
-
-  const employees = employeesQuery.data ?? []
-  const entries = upadQuery.data ?? []
-  const today = todayKey()
-  const thisMonth = monthKey(today)
-
-  const balances = useMemo(() => {
-    return employees
-      .map((employee) => {
-        const breakdown = upadBreakdownForEmployee(employee, entries, today)
-        const empEntries = entries.filter((entry) => entry.employee === employee.id)
-        const sorted = [...empEntries].sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)))
-        const oldestGiven = empEntries
-          .filter((e) => e.kind === 'given')
-          .sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)))[0]
-        const openDays = oldestGiven ? Math.max(0, daysBetweenInclusive(oldestGiven.date, today) - 1) : 0
-        const activeBal = upadConfig.activeBalance(breakdown.chaluPaise, breakdown.motoPaise)
-        return {
-          employee,
-          balance: activeBal,
-          chalu: breakdown.chaluPaise,
-          moto: breakdown.motoPaise,
-          lastEntry: sorted[0],
-          oldestGiven,
-          openDays,
-        }
-      })
-      .filter((row) => row.balance > 0)
-      .sort((a, b) => b.balance - a.balance)
-  }, [employees, entries, today, upadConfig])
-
-  const runningBalances = useMemo(() => {
-    const sortedAsc = [...entries].sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || (a.created ?? '').localeCompare(b.created ?? ''))
-    const map = new Map<string, number>()
-    const perEmployee = new Map<string, number>()
-    for (const e of sortedAsc) {
-      const cur = perEmployee.get(e.employee) ?? 0
-      const delta = e.kind === 'given' ? e.amount_paise : -e.amount_paise
-      const next = Math.max(0, cur + delta)
-      perEmployee.set(e.employee, next)
-      map.set(e.id, next)
-    }
-    return map
-  }, [entries])
-
-  const totals = useMemo(() => {
-    const monthEntries = entries.filter((entry) => dateKey(entry.date).startsWith(thisMonth))
-    return {
-      outstanding: balances.reduce((sum, row) => sum + row.balance, 0),
-      given: monthEntries
-        .filter((entry) => entry.kind === 'given')
-        .reduce((sum, entry) => sum + entry.amount_paise, 0),
-      returned: monthEntries
-        .filter((entry) => entry.kind === 'returned')
-        .reduce((sum, entry) => sum + entry.amount_paise, 0),
-      recovered: monthEntries
-        .filter((entry) => entry.kind === 'recovery')
-        .reduce((sum, entry) => sum + entry.amount_paise, 0),
-      writtenOff: monthEntries
-        .filter((entry) => entry.kind === 'writeoff')
-        .reduce((sum, entry) => sum + entry.amount_paise, 0),
-    }
-  }, [balances, entries, thisMonth])
-
-  const employeeMap = useMemo(
-    () => new Map(employees.map((employee) => [employee.id, employee])),
-    [employees],
-  )
-
-  const filteredEntries = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    return [...entries]
-      .filter((entry) => {
-        if (kindFilter !== 'all' && entry.kind !== kindFilter) return false
-        if (!term) return true
-        const employee = employeeMap.get(entry.employee)
-        return (
-          employee?.name.toLowerCase().includes(term) ||
-          employee?.employee_no.toLowerCase().includes(term) ||
-          entry.note.toLowerCase().includes(term)
-        )
-      })
-      .sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)))
-  }, [entries, kindFilter, search, employeeMap])
-
-  function openModal(employeeId?: string, kind: UpadKind = 'given') {
-    setModalEmployeeId(employeeId)
-    setModalKind(kind)
-    setUpadOpen(true)
+  function refresh() {
+    return qc.invalidateQueries({ queryKey: ['attendance-data'] })
   }
 
-  const loading = employeesQuery.isLoading || upadQuery.isLoading
-
-  if (upadConfig.isBothOff) {
-    return (
-      <div className="py-12">
-        <Card className="mx-auto max-w-lg p-8 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-stone-100 text-stone-500">
-            <Coins className="h-7 w-7 text-stone-400" />
-          </div>
-          <h2 className="mt-4 text-base font-extrabold text-stone-900">Upad is configured in Settings</h2>
-          <p className="mt-2 text-xs text-stone-500 leading-relaxed">
-            Cash advances and upad deductions can be configured in Settings.
-          </p>
-          <div className="mt-6 flex justify-center">
-            <Button onClick={() => onNavigate('settings')}>
-              Go to Settings
-            </Button>
-          </div>
-        </Card>
-      </div>
-    )
+  if (query.isLoading) {
+    return <div role="status" aria-live="polite" className="p-8 text-center text-xs font-semibold text-stone-500">{tx("Loading Upad records…")}</div>
   }
+  if (query.isError || !query.data) {
+    return <div role="alert" aria-live="assertive" className="p-4 text-xs font-bold text-rose-700">{tx('Could not load Upad ledger from PocketBase.')}</div>
+  }
+
+  const { employees, upad } = query.data
+
+  const workerRows = employees
+    .map((worker) => {
+      const workerEntries = upad.filter((e) => e.employee === worker.id && !e.voided)
+      const balance = calcUpadBalance(worker.opening_upad_paise, workerEntries)
+      const lastEntry = workerEntries.sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)))[0]
+      return { worker, balance, lastEntry, entriesCount: workerEntries.length }
+    })
+    .sort((a, b) => b.balance - a.balance)
+    .filter(({ worker, balance }) => {
+      const matchSearch = `${worker.name} ${worker.role} ${worker.phone}`.toLowerCase().includes(search.toLowerCase())
+      const matchFilter = filter === 'all' || (filter === 'owing' ? balance > 0 : balance <= 0)
+      return matchSearch && matchFilter
+    })
+
+  const totalOutstanding = employees.reduce((sum, worker) => {
+    return sum + calcUpadBalance(worker.opening_upad_paise, upad.filter((e) => e.employee === worker.id && !e.voided))
+  }, 0)
+
+  const owingWorkersCount = employees.filter((worker) => {
+    return calcUpadBalance(worker.opening_upad_paise, upad.filter((e) => e.employee === worker.id && !e.voided)) > 0
+  }).length
+
+  const currentMonthPrefix = todayKey().slice(0, 7)
+  const monthGives = upad
+    .filter((e) => !e.voided && e.kind === 'give' && dateKey(e.date).startsWith(currentMonthPrefix))
+    .reduce((sum, e) => sum + e.amount_paise, 0)
+  const monthRepays = upad
+    .filter((e) => !e.voided && e.kind === 'repay' && dateKey(e.date).startsWith(currentMonthPrefix))
+    .reduce((sum, e) => sum + e.amount_paise, 0)
+
+  // Recent activity across all workers
+  const recentMovements = upad
+    .filter((e) => !e.voided)
+    .sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date)) || b.id.localeCompare(a.id))
+    .slice(0, 10)
+
+  const selectedWorker = employees.find((w) => w.id === selectedWorkerId)
 
   return (
-    <div>
-      <PageHeader
-        eyebrow="Cash Advances & Recovery"
-        title="Upad"
-        description="Track cash advances given outside regular payroll, cash handbacks, and salary recoveries."
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => openModal(undefined, 'returned')}>
-              <RotateCcw className="h-4 w-4 text-sky-600" />
-              <span>Record Cash Return</span>
-            </Button>
-            <Button onClick={() => openModal(undefined, 'given')}>
-              <HandCoins className="h-4 w-4" />
-              <span>Give Upad</span>
-            </Button>
-          </>
-        }
-      />
+    <div className="space-y-3.5">
+      <h1 className="sr-only">{tx('Upad')}</h1>
+      {/* Metric Cards Header */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <div className="rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-stone-500">
+            <Coins className="h-3.5 w-3.5 text-rose-600" /> {tx("Upad Balance")}
+          </div>
+          <div className="mt-1 text-base font-black tabular-nums text-rose-800">
+            {formatMoney(totalOutstanding)}
+          </div>
+          <div className="mt-0.5 text-[10px] text-stone-400">{tx("Total balance owed")}</div>
+        </div>
 
-      {/* Summary KPI Cards */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
-        <Stat
-          label="Total Outstanding"
-          value={formatMoney(totals.outstanding)}
-          hint={`${balances.length} workers currently owe`}
-          tone="red"
-          icon={<Coins className="h-5 w-5" />}
-        />
-        <Stat
-          label="Given This Month"
-          value={formatMoney(totals.given)}
-          hint="Total new advances"
-          tone="amber"
-          icon={<TrendingUp className="h-5 w-5" />}
-        />
-        <Stat
-          label="Cash Returned"
-          value={formatMoney(totals.returned)}
-          hint="Handed back in cash"
-          tone="blue"
-          icon={<RotateCcw className="h-5 w-5" />}
-        />
-        <Stat
-          label="Salary Recovered"
-          value={formatMoney(totals.recovered)}
-          hint="Deducted at payout"
-          tone="green"
-          icon={<TrendingDown className="h-5 w-5" />}
-        />
-        <Stat
-          label="Written Off"
-          value={formatMoney(totals.writtenOff)}
-          hint="Cleared unrecoverable"
-          tone="default"
-        />
+        <div className="rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-stone-500">
+            <Users className="h-3.5 w-3.5 text-amber-600" /> {tx("Workers with Balance")}
+          </div>
+          <div className="mt-1 text-base font-black tabular-nums text-stone-900">
+            {owingWorkersCount} / {employees.length}
+          </div>
+          <div className="mt-0.5 text-[10px] text-stone-400">{tx("Workers with an Upad balance")}</div>
+        </div>
+
+        <div className="rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-stone-500">
+            <ArrowUpRight className="h-3.5 w-3.5 text-sky-600" /> {tx("Upad Given This Month")}
+          </div>
+          <div className="mt-1 text-base font-black tabular-nums text-sky-900">
+            {formatMoney(monthGives)}
+          </div>
+          <div className="mt-0.5 text-[10px] text-stone-400">{tx("Cash given")}</div>
+        </div>
+
+        <div className="rounded-xl border border-stone-200 bg-white p-3 shadow-xs">
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-stone-500">
+            <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-600" /> {tx("Cash Returned This Month")}
+          </div>
+          <div className="mt-1 text-base font-black tabular-nums text-emerald-900">
+            {formatMoney(monthRepays)}
+          </div>
+          <div className="mt-0.5 text-[10px] text-stone-400">{tx("Cash repayments")}</div>
+        </div>
       </div>
 
-      {/* Outstanding Balances By Employee */}
-      <Card className="mb-5 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-stone-200/80 px-4 py-3 bg-stone-50/60">
-          <div>
-            <div className="text-sm font-extrabold text-stone-900">Outstanding By Worker</div>
-            <div className="text-xs text-stone-500">
-              Opening upad + advances minus recoveries and cash returned.
-            </div>
-          </div>
-          <span className="rounded-full bg-stone-200/60 px-2.5 py-0.5 text-xs font-bold text-stone-700">
-            {balances.length} workers
-          </span>
-        </div>
-
-        {loading ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-14 text-sm font-semibold text-stone-500">
-            <Spinner className="h-6 w-6" />
-            <span>Loading upad balances…</span>
-          </div>
-        ) : !balances.length ? (
-          <div className="p-8">
-            <EmptyState
-              icon={<Coins className="h-7 w-7 text-emerald-500" />}
-              title="All Upad Balances Settled"
-              description="No employee currently owes any upad advances."
-              action={
-                <Button variant="secondary" onClick={() => openModal(undefined, 'given')}>
-                  Record an advance
-                </Button>
-              }
-            />
-          </div>
-        ) : (
-          <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-            {balances.map(({ employee, balance, chalu, moto, lastEntry, openDays }) => (
-              <div
-                key={employee.id}
-                className="group flex flex-col justify-between rounded-2xl border border-stone-200 bg-white p-3.5 shadow-xs transition hover:border-amber-300 hover:shadow-md"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onNavigate(`employees/${employee.id}`)}
-                      className="flex min-w-0 items-center gap-2.5 text-left"
-                    >
-                      <Avatar name={employee.name} size="sm" />
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-extrabold text-stone-900 group-hover:text-amber-800 transition">
-                          {employee.name}
-                        </div>
-                        <div className="text-[10px] text-stone-400">
-                          #{employee.employee_no}
-                          {lastEntry ? ` · last ${formatDateShort(lastEntry.date)}` : ''}
-                          {!employee.active ? ' · inactive' : ''}
-                        </div>
-                      </div>
-                    </button>
-                    <div className="text-right">
-                      <div className="text-base font-black text-rose-600 tabular-nums">
-                        {formatMoney(balance)}
-                      </div>
-                      <div className="text-[10px] font-bold text-stone-500">
-                        {upadConfig.isBothOn
-                          ? `${upadConfig.chaluLabel} ${formatMoney(chalu)} · ${upadConfig.motoLabel} ${formatMoney(moto)}`
-                          : `${upadConfig.singleBucket?.label || 'Upad'}: ${formatMoney(balance)}`}
-                      </div>
-                    </div>
-                  </div>
-
-                  {openDays > 0 && (
-                    <div className="mt-2.5 flex items-center justify-between text-[11px]">
-                      <span className="text-stone-400 font-medium">Advance age:</span>
-                      <span
-                        className={clsx(
-                          'rounded-md px-1.5 py-0.5 font-bold tabular-nums text-[10px]',
-                          openDays >= 14
-                            ? 'border border-amber-300 bg-amber-100 text-amber-900'
-                            : 'bg-stone-100 text-stone-700',
-                        )}
-                      >
-                        Open for {openDays} days
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5 border-t border-stone-100 pt-2.5">
-                  <button
-                    type="button"
-                    onClick={() => openModal(employee.id, 'returned')}
-                    className="rounded-lg px-2 py-1 text-xs font-bold text-sky-700 hover:bg-sky-50 transition"
-                  >
-                    + Return Cash
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openModal(employee.id, 'given')}
-                    className="rounded-lg px-2 py-1 text-xs font-bold text-amber-700 hover:bg-amber-50 transition"
-                  >
-                    + Give Upad
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openModal(employee.id, 'writeoff')}
-                    className="rounded-lg px-2 py-1 text-xs font-bold text-rose-700 hover:bg-rose-50 transition"
-                    title="Write off uncollectable upad advance"
-                  >
-                    Write Off
-                  </button>
-                </div>
+      {/* Worker list: search, balance filters, and ledger access */}
+      <div className="grid gap-3.5 xl:grid-cols-[1fr_320px]">
+        {/* Workers List Table */}
+        <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-2xs">
+          <div className="flex flex-col gap-2.5 border-b border-stone-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-1 items-center gap-2.5">
+              <div className="relative flex-1 sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  aria-label={tx('Search workers')}
+                  placeholder={tx("Search workers by name or role…")}
+                  className="h-8 w-full rounded-lg border border-stone-200 bg-stone-50 pl-8 pr-2.5 text-xs font-medium outline-none transition focus:border-stone-900 focus:bg-white"
+                />
               </div>
-            ))}
-          </div>
-        )}
-      </Card>
 
-      {/* Upad Ledger History */}
-      <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-stone-200/80 px-4 py-3 sm:flex-row sm:items-center sm:justify-between bg-stone-50/60">
-          <div>
-            <div className="text-sm font-extrabold text-stone-900">Upad Transaction Ledger</div>
-            <div className="text-xs text-stone-500">
-              Audit log of every advance given, cash returned, salary recovered, and written off.
+              <div className="inline-flex rounded-lg border border-stone-200 bg-stone-100 p-0.5 text-xs font-semibold text-stone-600">
+                {(['all', 'owing', 'clear'] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFilter(f)}
+                    className={clsx(
+                      'rounded-md px-2.5 py-1 text-[11px] capitalize transition cursor-pointer',
+                      filter === f ? 'bg-white font-bold text-stone-900 shadow-2xs' : 'hover:text-stone-900',
+                    )}
+                  >
+                    {f === 'all' ? tx('All') : f === 'owing' ? tx('Owing') : tx('Zero')}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Select
-              className="h-9 w-full py-1 text-xs sm:w-40 font-semibold"
-              value={kindFilter}
-              onChange={(event) => setKindFilter(event.target.value as 'all' | UpadKind)}
+            <button
+              type="button"
+              onClick={() => setQuickModalWorkerId(employees[0]?.id ?? '')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-sky-700 px-3.5 text-xs font-bold text-white shadow-xs transition hover:bg-sky-800 active:scale-[0.96] cursor-pointer"
             >
-              <option value="all">All Transactions</option>
-              <option value="given">Advances Given</option>
-              <option value="returned">Cash Returned</option>
-              <option value="recovery">Salary Recovered</option>
-              <option value="writeoff">Written Off</option>
-            </Select>
-
-            <div className="w-full sm:w-60">
-              <SearchInput
-                placeholder="Search worker or note…"
-                value={search}
-                onChange={setSearch}
-              />
-            </div>
+              <Plus className="h-3.5 w-3.5" />
+              {tx("New Entry")}
+            </button>
           </div>
-        </div>
 
-        {filteredEntries.length ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead className="bg-stone-50 text-left text-[10px] font-extrabold uppercase tracking-wider text-stone-500 border-b border-stone-200">
+            <table aria-label={tx('Workers with Balance')} className="w-full text-left text-xs">
+              <caption className="sr-only">{tx('Workers with Balance')}</caption>
+              <thead className="border-b border-stone-200 bg-stone-50/95 text-[11px] font-semibold text-stone-600">
                 <tr>
-                  <th className="px-4 py-2.5">Date</th>
-                  <th className="px-4 py-2.5">Employee</th>
-                  <th className="px-4 py-2.5">Type</th>
-                  <th className="px-4 py-2.5 text-right">Amount</th>
-                  <th className="px-4 py-2.5 text-right">Running Bal</th>
-                  <th className="px-4 py-2.5">Note</th>
-                  <th className="px-4 py-2.5">Source</th>
+                  <th className="px-3.5 py-2.5">{tx("Worker")}</th>
+                  <th className="px-3.5 py-2.5 text-right font-semibold">{tx("Upad Balance")}</th>
+                  <th className="px-3.5 py-2.5 text-right font-semibold">{tx("Opening Upad")}</th>
+                  <th className="px-3.5 py-2.5 font-semibold">{tx("Latest Movement")}</th>
+                  <th className="px-3.5 py-2.5 text-right font-semibold">{tx("Action")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {filteredEntries.map((entry) => {
-                  const employee = employeeMap.get(entry.employee)
-                  const positive = entry.kind === 'given'
-                  return (
-                    <tr key={entry.id} className="hover:bg-stone-50/80 transition-colors">
-                      <td className="px-4 py-3 text-xs font-semibold text-stone-600">
-                        {formatDateShort(entry.date)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {employee ? (
-                          <button
-                            type="button"
-                            onClick={() => onNavigate(`employees/${employee.id}`)}
-                            className="text-left group"
-                          >
-                            <div className="text-[13px] font-extrabold text-stone-900 group-hover:text-teal-700 transition">
-                              {employee.name}
-                            </div>
-                            <div className="text-[10px] text-stone-400">
-                              #{employee.employee_no}
-                            </div>
-                          </button>
-                        ) : (
-                          <span className="text-stone-400">Unknown</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge
-                            tone={
-                              entry.kind === 'given'
-                                ? 'amber'
-                                : entry.kind === 'returned'
-                                  ? 'blue'
-                                  : entry.kind === 'recovery'
-                                    ? 'green'
-                                    : 'neutral'
-                            }
-                            dot
-                          >
-                            {KIND_LABEL[entry.kind]}
-                          </Badge>
+                {workerRows.map(({ worker, balance, lastEntry, entriesCount }) => (
+                  <tr
+                    key={worker.id}
+                    onClick={() => setSelectedWorkerId(worker.id)}
+                    className="cursor-pointer transition hover:bg-sky-50/50"
+                  >
+                    <td className="px-3.5 py-2">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={worker.name} size="sm" />
+                        <div>
+                          <div className="font-bold text-stone-900 hover:text-sky-800">{worker.name}</div>
+                          <div className="text-[10px] text-stone-400">
+                            {tx(worker.role || 'Worker')} {worker.phone ? `· ${worker.phone}` : ''}
+                          </div>
                         </div>
-                      </td>
-                      <td
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <span
                         className={clsx(
-                          'px-4 py-3 text-right text-sm font-black tabular-nums',
-                          positive ? 'text-rose-600' : 'text-emerald-700',
+                          'font-black tabular-nums',
+                          balance > 0 ? 'text-rose-800' : 'text-stone-400',
                         )}
                       >
-                        {positive ? '+' : '−'}
-                        {formatMoney(entry.amount_paise)}
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs font-bold text-stone-800 tabular-nums">
-                        {formatMoney(runningBalances.get(entry.id) ?? 0)}
-                      </td>
-                      <td className="max-w-[18rem] truncate px-4 py-3 text-xs text-stone-600">
-                        {entry.note || '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {entry.payout_id ? (
-                          <Badge tone="blue" title="Issued by a payout. Undo that payout to change this.">Payout Issued</Badge>
-                        ) : entry.statement ? (
-                          <Badge tone="blue">Payout Settled</Badge>
-                        ) : (
-                          <span className="text-[11px] font-semibold text-stone-400">Manual</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
+                        {formatMoney(balance)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-stone-500">
+                      {formatMoney(worker.opening_upad_paise)}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] text-stone-500">
+                      {lastEntry ? (
+                        <div className="flex items-center gap-1">
+                          <span
+                            className={clsx(
+                              'font-bold',
+                              lastEntry.kind === 'give'
+                                ? 'text-sky-700'
+                                : lastEntry.kind === 'deduct'
+                                  ? 'text-rose-700'
+                                  : 'text-emerald-700',
+                            )}
+                          >
+                            {tx(lastEntry.kind === 'give' ? 'Give Upad' : lastEntry.kind === 'deduct' ? 'Upad Deduct' : 'Cash Return')}
+                          </span>
+                          <span>{formatMoney(lastEntry.amount_paise)}</span>
+                          <span className="text-[10px] text-stone-400">({formatDateShort(lastEntry.date)})</span>
+                        </div>
+                      ) : (
+                        <span className="text-stone-400">{tx("No entries")}</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedWorkerId(worker.id)
+                        }}
+                        className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-bold text-sky-800 shadow-xs hover:border-sky-300 hover:bg-sky-50"
+                      >
+                        {tx('Ledger')} ({entriesCount})
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!workerRows.length && (
+                  <tr>
+                    <td colSpan={5} className="p-8 text-center text-xs text-stone-400">
+                      {tx("No workers match this search.")}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
-        ) : (
-          <div className="p-8">
-            <EmptyState
-              icon={<Users className="h-7 w-7 text-stone-400" />}
-              title={search || kindFilter !== 'all' ? 'No matching entries' : 'No upad records yet'}
-              description={
-                search || kindFilter !== 'all'
-                  ? 'Try a different search term or filter.'
-                  : 'Record an advance to start the ledger.'
-              }
-              action={
-                !search && kindFilter === 'all' ? (
-                  <Button onClick={() => openModal(undefined, 'given')}>Record Upad</Button>
-                ) : undefined
-              }
-            />
-          </div>
-        )}
-      </Card>
+        </div>
 
-      <div className="mt-3 text-xs text-stone-400">
-        Note: Cash returned and payout salary recovery both reduce outstanding upad.
+        {/* Overview Sidebar: Who took how much on which day */}
+        <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-xs">
+          <div className="border-b border-stone-100 bg-stone-50/50 px-3.5 py-2.5">
+            <h2 className="flex items-center gap-1.5 text-xs font-black text-stone-900">
+              <History className="h-3.5 w-3.5 text-stone-500" />
+              {tx("Recent Movements")}
+            </h2>
+            <p className="text-[10px] text-stone-400">{tx("Who took how much, and on which day")}</p>
+          </div>
+
+          <div className="divide-y divide-stone-100 overflow-y-auto max-h-[500px]">
+            {recentMovements.length ? (
+              recentMovements.map((entry) => {
+                const worker = employees.find((w) => w.id === entry.employee)
+                return (
+                  <div key={entry.id} className="flex items-center justify-between p-2.5 text-xs hover:bg-stone-50/60">
+                    <div className="min-w-0 pr-2">
+                      <div className="font-bold text-stone-900 truncate">{worker?.name || 'Worker'}</div>
+                      <div className="text-[10px] text-stone-400">
+                        {formatDateShort(entry.date)} ·{' '}
+                        {entry.note ||
+                          (entry.kind === 'give'
+                            ? tx('Advance')
+                            : entry.kind === 'deduct'
+                              ? tx('Upad Deduct')
+                              : tx('Cash Repay'))}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div
+                        className={clsx(
+                          'font-black tabular-nums',
+                          entry.kind === 'give'
+                            ? 'text-sky-800'
+                            : entry.kind === 'deduct'
+                              ? 'text-rose-800'
+                              : 'text-emerald-800',
+                        )}
+                      >
+                        {entry.kind === 'give' ? '+' : '−'}
+                        {formatMoney(entry.amount_paise)}
+                      </div>
+                      <div className="text-[9px] font-bold text-stone-400 capitalize">{tx(entry.kind)}</div>
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="p-6 text-center text-xs text-stone-400">{tx("No Upad movements recorded yet.")}</div>
+            )}
+          </div>
+        </div>
       </div>
 
-      <SettleModal target={settleTarget} onClose={() => setSettleTarget(null)} />
-      <UpadModal
-        open={upadOpen}
-        onClose={() => setUpadOpen(false)}
-        employees={employees}
-        defaultEmployeeId={modalEmployeeId}
-        defaultKind={modalKind}
-      />
+      {/* Worker Ledger Modal (Section 10.3 + Section 13 O1) */}
+      {selectedWorker && (
+        <WorkerLedgerModal
+          worker={selectedWorker}
+          upad={upad.filter((e) => e.employee === selectedWorker.id && !e.voided)}
+          onClose={() => setSelectedWorkerId(null)}
+          onSave={async (kind, amount, note) => {
+            await addUpadEntry({
+              employee: selectedWorker.id,
+              date: todayKey(),
+              kind,
+              amount_paise: amount,
+              note,
+            })
+            void refresh()
+          }}
+        />
+      )}
+
+      {/* Quick New Entry Modal */}
+      {quickModalWorkerId && (
+        <QuickUpadModal
+          employees={employees}
+          initialWorkerId={quickModalWorkerId}
+          onClose={() => setQuickModalWorkerId(null)}
+          onSave={async (workerId, kind, amount, note) => {
+            await addUpadEntry({
+              employee: workerId,
+              date: todayKey(),
+              kind,
+              amount_paise: amount,
+              note,
+            })
+            void refresh()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function WorkerLedgerModal({
+  worker,
+  upad,
+  onClose,
+  onSave,
+}: {
+  worker: Employee
+  upad: UpadEntry[]
+  onClose: () => void
+  onSave: (kind: 'give' | 'deduct' | 'repay', amount: number, note: string) => Promise<void>
+}) {
+  const [kind, setKind] = useState<'give' | 'deduct' | 'repay'>('give')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const ordered = upad.slice().sort((a, b) => dateKey(a.date).localeCompare(dateKey(b.date)) || a.id.localeCompare(b.id))
+  let running = worker.opening_upad_paise
+  const ledger = ordered.map((entry) => {
+    running += entry.kind === 'give' ? entry.amount_paise : -entry.amount_paise
+    return { entry, balance: running }
+  }).reverse()
+
+  const currentBalance = calcUpadBalance(worker.opening_upad_paise, ordered)
+
+  async function handleAddEntry() {
+    const val = parseMoneyInput(amount)
+    if (val <= 0) return
+    setBusy(true)
+    setError('')
+    try {
+      await onSave(kind, val, note)
+      setAmount('')
+      setNote('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to record entry.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`${worker.name} — ${tx('Upad Ledger')}`}>
+      <div className="space-y-3.5 text-xs">
+        {/* Header Summary */}
+        <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50 p-3">
+          <div>
+            <div className="text-[10px] font-bold text-stone-500">{tx("Opening Balance")}</div>
+            <div className="font-bold tabular-nums text-stone-800">{formatMoney(worker.opening_upad_paise)}</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] font-bold text-stone-500">{tx("Current Outstanding")}</div>
+            <div className="text-base font-black tabular-nums text-rose-800">{formatMoney(currentBalance)}</div>
+          </div>
+        </div>
+
+        {/* Action Panel */}
+        <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            {(['give', 'deduct', 'repay'] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKind(k)}
+                className={clsx(
+                  'rounded-lg px-2.5 py-1 text-[11px] font-black transition',
+                  kind === k
+                    ? k === 'give'
+                      ? 'bg-sky-700 text-white shadow-xs'
+                      : k === 'deduct'
+                        ? 'bg-rose-700 text-white shadow-xs'
+                        : 'bg-emerald-700 text-white shadow-xs'
+                    : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-50',
+                )}
+              >
+                {tx(k === 'give' ? 'Give Advance' : k === 'deduct' ? 'Upad Deduct' : 'Cash Return')}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="text-[10px] font-bold text-stone-700">
+              {tx("Amount (₹)")}
+              <input
+                autoFocus
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="₹0.00"
+                className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-sm font-bold outline-none focus:border-sky-600"
+              />
+            </label>
+            <label className="text-[10px] font-bold text-stone-700">
+              {tx("Note (optional)")}
+              <input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={tx("e.g. Festival advance")}
+                className="mt-0.5 h-8 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-xs outline-none focus:border-sky-600"
+              />
+            </label>
+          </div>
+
+          {error && <p role="alert" aria-live="assertive" className="mt-2 text-xs font-bold text-rose-700">{error}</p>}
+
+          <button
+            type="button"
+            disabled={!parseMoneyInput(amount) || busy}
+            onClick={() => void handleAddEntry()}
+            className="mt-2.5 w-full rounded-lg bg-sky-700 py-1.5 text-xs font-black text-white shadow-xs hover:bg-sky-800 disabled:opacity-50"
+          >
+            {busy ? tx('Saving…') : tx('Record Entry')}
+          </button>
+        </div>
+
+        {/* Ledger Table */}
+        <div>
+          <div className="mb-1 text-[10px] font-black uppercase text-stone-500">{tx("Transaction History")}</div>
+          <div className="max-h-56 overflow-y-auto rounded-lg border border-stone-200 bg-white divide-y divide-stone-100">
+            {ledger.length ? (
+              ledger.map(({ entry, balance }) => (
+                <div key={entry.id} className="flex items-center justify-between px-3 py-2 text-xs">
+                  <div>
+                    <div className="font-bold text-stone-900">
+                      {entry.note ||
+                        (entry.kind === 'give'
+                          ? 'Advance given'
+                          : entry.kind === 'deduct'
+                            ? 'Upad Deduct'
+                            : 'Cash returned')}
+                    </div>
+                    <div className="text-[10px] text-stone-400">
+                      {formatDateShort(entry.date)} {entry.payout_id ? '· Payout settlement' : ''}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div
+                      className={clsx(
+                        'font-black tabular-nums',
+                        entry.kind === 'give' ? 'text-sky-800' : 'text-stone-800',
+                      )}
+                    >
+                      {entry.kind === 'give' ? '+' : '−'}
+                      {formatMoney(entry.amount_paise)}
+                    </div>
+                    <div className="text-[9px] text-stone-400">Balance {formatMoney(balance)}</div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="p-6 text-center text-xs text-stone-400">{tx("No transaction entries yet.")}</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function QuickUpadModal({
+  employees,
+  initialWorkerId,
+  onClose,
+  onSave,
+}: {
+  employees: Employee[]
+  initialWorkerId: string
+  onClose: () => void
+  onSave: (workerId: string, kind: 'give' | 'deduct' | 'repay', amount: number, note: string) => Promise<void>
+}) {
+  const [workerId, setWorkerId] = useState(initialWorkerId)
+  const [kind, setKind] = useState<'give' | 'deduct' | 'repay'>('give')
+  const [amount, setAmount] = useState('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  return (
+    <Modal open onClose={onClose} title={tx('Record Upad Transaction')}>
+      <div className="space-y-3 text-xs">
+        <label className="block text-[10px] font-bold text-stone-700">
+          {tx("Worker")}
+          <select
+            value={workerId}
+            onChange={(e) => setWorkerId(e.target.value)}
+            className="mt-1 h-8 w-full rounded-lg border border-stone-300 bg-white px-2 text-xs font-bold outline-none"
+          >
+            {employees.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name} ({w.role || 'Worker'})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="flex gap-1.5">
+          {(['give', 'deduct', 'repay'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setKind(k)}
+              className={clsx(
+                'flex-1 rounded-lg py-1.5 text-center text-[11px] font-black transition',
+                kind === k
+                  ? k === 'give'
+                    ? 'bg-sky-700 text-white shadow-xs'
+                    : k === 'deduct'
+                      ? 'bg-rose-700 text-white shadow-xs'
+                      : 'bg-emerald-700 text-white shadow-xs'
+                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200',
+              )}
+            >
+          {tx(k === 'give' ? 'Give Advance' : k === 'deduct' ? 'Upad Deduct' : 'Cash Return')}
+            </button>
+          ))}
+        </div>
+
+        <label className="block text-[10px] font-bold text-stone-700">
+          {tx("Amount (₹)")}
+          <input
+            autoFocus
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="₹0.00"
+            className="mt-1 h-9 w-full rounded-lg border border-stone-300 bg-white px-3 text-base font-bold outline-none focus:border-sky-600"
+          />
+        </label>
+
+        <label className="block text-[10px] font-bold text-stone-700">
+          {tx("Note (optional)")}
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={tx("e.g. Festival advance")}
+            className="mt-1 h-8 w-full rounded-lg border border-stone-300 bg-white px-2.5 text-xs outline-none focus:border-sky-600"
+          />
+        </label>
+
+        {error && <p role="alert" aria-live="assertive" className="text-xs font-bold text-rose-700">{error}</p>}
+
+        <button
+          type="button"
+          disabled={!workerId || !parseMoneyInput(amount) || busy}
+          onClick={async () => {
+            setBusy(true)
+            setError('')
+            try {
+              await onSave(workerId, kind, parseMoneyInput(amount), note)
+              onClose()
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Failed to save.')
+            } finally {
+              setBusy(false)
+            }
+          }}
+          className="mt-2 w-full rounded-lg bg-sky-700 p-2 text-xs font-black text-white shadow-xs hover:bg-sky-800 disabled:opacity-50"
+        >
+          {busy ? tx('Saving…') : tx('Save Transaction')}
+        </button>
+      </div>
+    </Modal>
   )
 }
