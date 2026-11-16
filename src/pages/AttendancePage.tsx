@@ -558,11 +558,11 @@ export default function AttendancePage() {
               }}
               onClick={() => setTab('today')}
               className={clsx(
-                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition cursor-pointer',
-                tab === 'today' ? 'bg-white font-bold text-stone-900 shadow-2xs' : 'hover:text-stone-900',
+                'inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs sm:text-[13px] transition cursor-pointer',
+                tab === 'today' ? 'bg-white font-bold text-stone-900 shadow-2xs' : 'font-medium hover:text-stone-900',
               )}
             >
-              <CalendarCheck className={clsx('h-3.5 w-3.5', tab === 'today' ? 'text-emerald-700' : 'text-stone-400')} />
+              <CalendarCheck className={clsx('h-4 w-4', tab === 'today' ? 'text-emerald-700' : 'text-stone-400')} />
               {tx("Today's Roll Call")}
             </button>
             <button
@@ -581,15 +581,15 @@ export default function AttendancePage() {
               }}
               onClick={() => setTab('cycle')}
               className={clsx(
-                'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 transition cursor-pointer',
-                tab === 'cycle' ? 'bg-white font-bold text-stone-900 shadow-2xs' : 'hover:text-stone-900',
+                'inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-xs sm:text-[13px] transition cursor-pointer',
+                tab === 'cycle' ? 'bg-white font-bold text-stone-900 shadow-2xs' : 'font-medium hover:text-stone-900',
               )}
             >
-              <CalendarDays className={clsx('h-3.5 w-3.5', tab === 'cycle' ? 'text-emerald-700' : 'text-stone-400')} />
+              <CalendarDays className={clsx('h-4 w-4', tab === 'cycle' ? 'text-emerald-700' : 'text-stone-400')} />
               {tx("Cycle Register")}
             </button>
           </div>
-          <span className="text-xs font-semibold text-stone-500">
+          <span className="text-xs sm:text-sm font-bold text-stone-700">
             {tab === 'today'
               ? formatDateShort(rollDate)
               : selectedRun
@@ -671,23 +671,23 @@ export default function AttendancePage() {
                   <Avatar name={employee.name} size="sm" />
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-bold text-stone-900">{employee.name}</span>
+                      <span className="truncate text-base font-bold text-stone-900">{employee.name}</span>
                       {isLocked && (
                         <span title="This date is closed and settled" className="inline-flex items-center gap-0.5 rounded bg-stone-200 px-1.5 py-0.2 text-[9px] font-bold text-stone-600">
                           <LockKeyhole className="h-2.5 w-2.5" /> {tx("Closed")}
                         </span>
                       )}
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-stone-500">
-                      <span className="font-mono font-semibold text-stone-800">{formatMoney(employee.daily_rate_paise)}/d</span>
+                    <div className="flex flex-wrap items-center gap-2 text-xs sm:text-[13px] text-stone-600">
+                      <span className="font-mono font-bold text-stone-900">{formatMoney(employee.daily_rate_paise)}/d</span>
                       <span className="text-stone-300">·</span>
-                      <span>{tx(employee.role || 'Worker')}</span>
+                      <span className="font-medium text-stone-700">{tx(employee.role || 'Worker')}</span>
                       <span className="text-stone-300">·</span>
-                      <span className="font-mono font-semibold text-emerald-800">{workerDaysCount}d ({formatMoney(earnings)})</span>
+                      <span className="font-mono font-bold text-emerald-800">{workerDaysCount}d ({formatMoney(earnings)})</span>
                       {upadBalance > 0 && (
                         <>
                           <span className="text-stone-300">·</span>
-                          <span className="font-mono font-semibold text-slate-700">Upad: {formatMoney(upadBalance)}</span>
+                          <span className="font-mono font-bold text-slate-800">Upad: {formatMoney(upadBalance)}</span>
                         </>
                       )}
                       {att?.status === 'hours' && (
@@ -878,7 +878,7 @@ export default function AttendancePage() {
                   value={cycleChoice}
                   aria-label={tx('Select cycle')}
                   onChange={(e) => setCycleChoice(e.target.value)}
-                  className="h-8.5 rounded-lg border border-stone-200 bg-stone-50 pl-2.5 pr-8 text-xs font-bold text-stone-900 shadow-2xs outline-none transition hover:bg-stone-100 focus:border-stone-900 cursor-pointer appearance-none"
+                  className="h-9 rounded-lg border border-stone-200 bg-stone-50 pl-3 pr-8 text-xs sm:text-[13px] font-bold text-stone-900 shadow-2xs outline-none transition hover:bg-stone-100 focus:border-stone-900 cursor-pointer appearance-none"
                 >
                   <option value="open">
                     {tx('Open Cycle')} · {formatDateRange(openStarts.sort()[0] ?? today, today)}
@@ -899,18 +899,18 @@ export default function AttendancePage() {
                     setNewStartDateInput(cycleStart)
                     setChangeStartModalOpen(true)
                   }}
-                  className="inline-flex h-8.5 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 text-xs font-bold text-stone-700 shadow-2xs outline-none transition hover:border-emerald-600 hover:bg-emerald-50/40 hover:text-emerald-800 cursor-pointer"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs sm:text-[13px] font-bold text-stone-700 shadow-2xs outline-none transition hover:border-emerald-600 hover:bg-emerald-50/40 hover:text-emerald-800 cursor-pointer"
                   title={tx('Change starting date of current open cycle')}
                 >
-                  <Calendar className="h-3.5 w-3.5 text-emerald-700" />
+                  <Calendar className="h-4 w-4 text-emerald-700" />
                   <span>{tx('Change Start Date')}</span>
                 </button>
               )}
 
               {!selectedRun && (
-                <label className="flex h-8 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 text-[11px] font-medium text-stone-500">
+                <label className="flex h-9 items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 text-xs font-semibold text-stone-600">
                   {tx('Drawer cash')}
-                  <span className="text-stone-300">₹</span>
+                  <span className="text-stone-400 font-bold">₹</span>
                   <input
                     type="text"
                     inputMode="decimal"
@@ -918,39 +918,39 @@ export default function AttendancePage() {
                     value={drawerCashInput}
                     onChange={(event) => setDrawerCashInput(event.target.value)}
                     placeholder="0"
-                    className="w-20 bg-transparent text-right font-mono text-xs font-bold text-stone-900 outline-none placeholder:text-stone-300"
+                    className="w-20 bg-transparent text-right font-mono text-xs sm:text-[13px] font-bold text-stone-900 outline-none placeholder:text-stone-300"
                   />
                 </label>
               )}
 
               <div className="flex items-center gap-2 border-l border-stone-200 pl-3">
-                <div className="flex items-baseline gap-1.5 rounded-lg bg-stone-100 px-2.5 py-1">
-                  <span className="text-[11px] font-medium text-stone-500">{tx("Total To Pay:")}</span>
-                  <span className="font-mono text-xs font-bold text-stone-900 tabular-nums">
+                <div className="flex items-baseline gap-1.5 rounded-lg bg-stone-100 px-3 py-1.5">
+                  <span className="text-xs font-semibold text-stone-500">{tx("Total To Pay:")}</span>
+                  <span className="font-mono text-sm sm:text-base font-black text-stone-950 tabular-nums">
                     {formatMoney(totalToPay)}
                   </span>
                 </div>
 
-                <div className="flex items-baseline gap-1.5 rounded-lg bg-stone-100 px-2.5 py-1">
-                  <span className="text-[11px] font-medium text-stone-500">{tx('Paid so far:')}</span>
-                  <span className="font-mono text-xs font-bold text-emerald-800 tabular-nums">
+                <div className="flex items-baseline gap-1.5 rounded-lg bg-stone-100 px-3 py-1.5">
+                  <span className="text-xs font-semibold text-stone-500">{tx('Paid so far:')}</span>
+                  <span className="font-mono text-sm sm:text-base font-black text-emerald-800 tabular-nums">
                     {formatMoney(paidSoFar)}
                   </span>
                 </div>
 
-                <div className="hidden sm:flex items-baseline gap-1.5 rounded-lg bg-stone-100 px-2.5 py-1">
-                  <span className="text-[11px] font-medium text-stone-500">{tx("Ready:")}</span>
-                  <span className="text-xs font-bold text-stone-800 tabular-nums">
+                <div className="hidden sm:flex items-baseline gap-1.5 rounded-lg bg-stone-100 px-3 py-1.5">
+                  <span className="text-xs font-semibold text-stone-500">{tx("Ready:")}</span>
+                  <span className="text-sm font-black text-stone-900 tabular-nums">
                     {doneRows.length} / {rows.length}
                   </span>
                 </div>
 
                 {!selectedRun && <div className={clsx(
-                  'flex items-baseline gap-1.5 rounded-lg px-2.5 py-1',
+                  'flex items-baseline gap-1.5 rounded-lg px-3 py-1.5',
                   drawerLeft < 0 ? 'bg-rose-50 text-rose-800' : 'bg-stone-100 text-stone-700',
                 )}>
-                  <span className="text-[11px] font-medium">{tx('Drawer left:')}</span>
-                  <span className="font-mono text-xs font-bold tabular-nums">{formatMoney(drawerLeft, { signed: true })}</span>
+                  <span className="text-xs font-semibold">{tx('Drawer left:')}</span>
+                  <span className="font-mono text-sm sm:text-base font-black tabular-nums">{formatMoney(drawerLeft, { signed: true })}</span>
                 </div>}
               </div>
 
@@ -1048,7 +1048,7 @@ export default function AttendancePage() {
                         }
                         className={clsx(
                           'sticky top-0 z-10 border-b border-r px-1 py-1.5 text-center transition-colors duration-150 select-none relative group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600',
-                          isCollapsed ? 'min-w-[3.6rem]' : 'min-w-[4.25rem] w-[4.5rem]',
+                          isCollapsed ? 'min-w-[3.6rem]' : 'min-w-[4.5rem] w-[4.75rem]',
                           !isCollapsed && !selectedRun && 'cursor-pointer',
                           !isCollapsed &&
                             (isHoliday
@@ -1062,17 +1062,21 @@ export default function AttendancePage() {
                           <div className="flex flex-col items-center justify-center leading-tight">
                             <span
                               className={clsx(
-                                'text-[10px] font-bold uppercase tracking-wider',
-                                isHoliday ? 'text-rose-600' : 'text-stone-400',
+                                'text-[11px] font-bold uppercase tracking-wider',
+                                isHoliday ? 'text-rose-600' : 'text-stone-500',
                               )}
                             >
                               {weekdayShort(day)}
                             </span>
-                            {day === today && <span className="text-[8px] font-black uppercase leading-none text-emerald-700">{tx('Today')}</span>}
+                            {day === today && (
+                              <span className="rounded bg-emerald-100 px-1 py-0.2 text-[9px] font-black uppercase tracking-tight text-emerald-800">
+                                {tx('Today')}
+                              </span>
+                            )}
                             <span
                               className={clsx(
-                                'mt-0.5 text-xs font-bold',
-                                isHoliday ? 'text-rose-950 font-black' : 'text-stone-800',
+                                'mt-0.5 text-sm sm:text-[15px] font-black',
+                                isHoliday ? 'text-rose-950' : 'text-stone-900',
                               )}
                             >
                               {Number(day.slice(-2))}
@@ -1094,7 +1098,7 @@ export default function AttendancePage() {
 
                   <th
                     style={{ width: colWidths['earned'] ? `${colWidths['earned']}px` : undefined }}
-                    className="sticky top-0 z-10 w-24 min-w-[6rem] border-b border-r border-stone-200/70 bg-stone-50/80 px-2.5 py-2 text-right font-semibold text-stone-600 relative group select-none"
+                    className="sticky top-0 z-10 w-24 min-w-[6rem] border-b border-r border-stone-200/70 bg-stone-50/80 px-2.5 py-2 text-right text-xs sm:text-[13px] font-bold text-stone-700 relative group select-none"
                   >
                     <span>{tx("Earned")}</span>
                     <div
@@ -1106,7 +1110,7 @@ export default function AttendancePage() {
                   </th>
                   <th
                     style={{ width: colWidths['adj'] ? `${colWidths['adj']}px` : undefined }}
-                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-stone-200/70 bg-stone-50/80 px-1.5 py-2 text-right font-semibold text-stone-600 relative group select-none"
+                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-stone-200/70 bg-stone-50/80 px-1.5 py-2 text-right text-xs sm:text-[13px] font-bold text-stone-700 relative group select-none"
                   >
                     <span>{tx("Adj (+/−)")}</span>
                     <div
@@ -1118,7 +1122,7 @@ export default function AttendancePage() {
                   </th>
                   <th
                     style={{ width: colWidths['upad'] ? `${colWidths['upad']}px` : undefined }}
-                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-rose-200 bg-rose-50 px-1.5 py-2 text-right font-bold text-rose-900 relative group select-none"
+                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-rose-200 bg-rose-50 px-1.5 py-2 text-right text-xs sm:text-[13px] font-bold text-rose-950 relative group select-none"
                   >
                     <span>{tx("Upad")}</span>
                     <div
@@ -1130,7 +1134,7 @@ export default function AttendancePage() {
                   </th>
                   <th
                     style={{ width: colWidths['deduct'] ? `${colWidths['deduct']}px` : undefined }}
-                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-rose-200 bg-rose-50 px-1.5 py-2 text-right font-bold text-rose-900 relative group select-none"
+                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-rose-200 bg-rose-50 px-1.5 py-2 text-right text-xs sm:text-[13px] font-bold text-rose-950 relative group select-none"
                   >
                     <span>{tx("Upad Deduct")}</span>
                     <div
@@ -1142,7 +1146,7 @@ export default function AttendancePage() {
                   </th>
                   <th
                     style={{ width: colWidths['give'] ? `${colWidths['give']}px` : undefined }}
-                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-sky-200 bg-sky-50 px-1.5 py-2 text-right font-bold text-sky-900 relative group select-none"
+                    className="sticky top-0 z-10 w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-sky-200 bg-sky-50 px-1.5 py-2 text-right text-xs sm:text-[13px] font-bold text-sky-950 relative group select-none"
                   >
                     <span>{tx("Give Upad")}</span>
                     <div
@@ -1190,19 +1194,19 @@ export default function AttendancePage() {
                         )}
                       >
                         <div className="flex items-center gap-2.5">
-                          <span aria-hidden="true" className="w-4 shrink-0 text-right font-mono text-[9px] font-semibold tabular-nums text-stone-400">
+                          <span aria-hidden="true" className="w-5 shrink-0 text-right font-mono text-xs font-bold tabular-nums text-stone-500">
                             {rowIndex + 1}
                           </span>
                           {/* Worker Avatar Pill */}
                           <div className={clsx(
-                            'flex size-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold select-none',
+                            'flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-black select-none',
                             row.draft.is_done
                               ? row.settlement.carry_out_paise > 0
-                                ? 'bg-amber-200/70 text-amber-950'
-                                : 'bg-emerald-200/70 text-emerald-900'
+                                ? 'bg-amber-200/80 text-amber-950 ring-1 ring-amber-400'
+                                : 'bg-emerald-200/80 text-emerald-950 ring-1 ring-emerald-400'
                               : row.hasInput
-                                ? 'bg-amber-100 text-amber-950'
-                                : 'bg-stone-100 text-stone-700',
+                                ? 'bg-amber-100 text-amber-950 ring-1 ring-amber-300'
+                                : 'bg-stone-100 text-stone-700 ring-1 ring-stone-200',
                           )}>
                             {row.employee.name
                               .split(' ')
@@ -1218,18 +1222,18 @@ export default function AttendancePage() {
                                 <button
                                   disabled={Boolean(selectedRun)}
                                   onClick={() => setWorkerPopup(row.employee.id)}
-                                  className="truncate text-left text-xs sm:text-[13px] font-bold text-stone-900 transition hover:text-emerald-700 cursor-pointer"
+                                  className="truncate text-left text-sm sm:text-[15px] font-bold text-stone-900 transition hover:text-emerald-700 cursor-pointer"
                                 >
                                   {row.employee.name}
                                 </button>
-                                {locked && <LockKeyhole className="h-3 w-3 shrink-0 text-stone-400" />}
+                                {locked && <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-stone-400" />}
                                 {row.draft.is_done && (
-                                  <span className="shrink-0 rounded-full bg-emerald-100 px-1.5 py-0.2 text-[9px] font-bold text-emerald-800">
+                                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-600/20">
                                     {tx("✓ Done")}
                                   </span>
                                 )}
                               </div>
-                              <span className="shrink-0 font-mono text-[11px] font-semibold tabular-nums text-stone-500">
+                              <span className="shrink-0 font-mono text-xs font-bold tabular-nums text-stone-600">
                                 {formatMoney(row.employee.daily_rate_paise)}/d
                               </span>
                             </div>
@@ -1239,29 +1243,29 @@ export default function AttendancePage() {
                               {row.carry > 0 ? (
                                 <span
                                   title={`${tx('Unpaid salary carry')} · ${formatDateRange(row.start || today, cycleEnd)} · ${formatMoney(row.carry)}`}
-                                  className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 ring-1 ring-amber-600/20 tabular-nums"
+                                  className="rounded bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-900 ring-1 ring-amber-600/20 tabular-nums"
                                 >
                                   {tx('Carry +')}{formatMoney(row.carry)}
                                 </span>
                               ) : row.carry < 0 ? (
                                 <span
                                   title={`${tx('Salary balance owed')} · ${formatDateRange(row.start || today, cycleEnd)} · ${formatMoney(row.carry, { signed: true })}`}
-                                  className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-900 ring-1 ring-rose-600/20 tabular-nums"
+                                  className="rounded bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-900 ring-1 ring-rose-600/20 tabular-nums"
                                 >
                                   {tx('Carry −')}{formatMoney(Math.abs(row.carry))}
                                 </span>
                               ) : (
-                                <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-500 tabular-nums">
+                                <span className="rounded bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-500 tabular-nums">
                                   {tx("Carry ₹0")}
                                 </span>
                               )}
 
                               {row.upadBalance > 0 ? (
-                                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-800 ring-1 ring-slate-300/60 tabular-nums">
+                                <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-900 ring-1 ring-slate-300/80 tabular-nums">
                                   {tx('Upad')} {formatMoney(row.upadBalance)}
                                 </span>
                               ) : (
-                                <span className="rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-medium text-stone-500 tabular-nums">
+                                <span className="rounded bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-500 tabular-nums">
                                   {tx('Upad')} ₹0
                                 </span>
                               )}
@@ -1297,7 +1301,7 @@ export default function AttendancePage() {
                             key={day}
                             style={{ width: colWidths[day] ? `${colWidths[day]}px` : undefined }}
                             className={clsx(
-                              'min-w-[4.25rem] w-[4.5rem] border-b border-r px-1 py-1.5 text-center align-middle transition-colors',
+                              'min-w-[4.5rem] w-[4.75rem] border-b border-r px-1 py-1.5 text-center align-middle transition-colors',
                               isHoliday
                                 ? 'border-rose-100 bg-rose-50/40'
                                 : (beforeBoundary || selectedRun)
@@ -1315,9 +1319,10 @@ export default function AttendancePage() {
                                   if (event.key === 'Escape') setDayPicker(null)
                                 }}
                                 onClick={() => setDayPicker((current) => current?.employee === row.employee.id && current.date === day ? null : { employee: row.employee.id, date: day })}
-                                title={`${row.employee.name} · ${weekdayShort(day)} ${formatDateShort(day)} · Choose attendance`}
+                                onDoubleClick={() => showHours(row.employee, day, att)}
+                                title={`${row.employee.name} · ${weekdayShort(day)} ${formatDateShort(day)} · Click to mark, double-click for hours`}
                                 className={clsx(
-                                  'h-8 w-11 flex items-center justify-center rounded-lg text-xs font-black transition-all duration-150 ease-out select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600',
+                                  'h-9 w-12 flex items-center justify-center rounded-lg text-sm font-black transition-all duration-150 ease-out select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 cursor-pointer',
                                   beforeBoundary || selectedRun
                                     ? 'cursor-not-allowed bg-stone-100 text-stone-300'
                                     : att?.status === 'full'
@@ -1336,32 +1341,118 @@ export default function AttendancePage() {
                                 <span>{badge === '—' ? (isHoliday ? tx('Off') : '') : badge}</span>
                               </button>
                               {dayPicker?.employee === row.employee.id && dayPicker.date === day && !beforeBoundary && !selectedRun && (
-                                <div
-                                  role="group"
-                                  aria-label={`Attendance for ${row.employee.name}, ${formatDateShort(day)}`}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Escape') setDayPicker(null)
-                                  }}
-                                  className="absolute left-1/2 top-full z-40 mt-1 grid -translate-x-1/2 grid-cols-2 gap-1 rounded-lg border border-stone-200 bg-white p-1.5 shadow-xl"
-                                >
-                                  {([
-                                    ['full', 'P', 'bg-emerald-600'],
-                                    ['half', 'H', 'bg-amber-500'],
-                                    ['absent', 'A', 'bg-rose-500'],
-                                  ] as const).map(([status, label, color]) => (
-                                    <button key={status} type="button" onClick={() => { markAttendance(row.employee, day, status); setDayPicker(null) }} className={`h-7 min-w-8 rounded px-2 text-[10px] font-black text-white ${color}`}>
-                                      {label}
-                                    </button>
-                                  ))}
-                                  <button type="button" onClick={() => { showHours(row.employee, day, att); setDayPicker(null) }} className="h-7 rounded bg-sky-50 px-2 text-[10px] font-black text-sky-800 ring-1 ring-sky-200">{tx("Custom")}</button>
-                                  <button type="button" onClick={() => { markAttendance(row.employee, day, undefined); setDayPicker(null) }} className="col-span-2 h-6 rounded text-[9px] font-semibold text-stone-500 hover:bg-stone-100">{tx("Clear")}</button>
-                                </div>
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-30 cursor-default"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setDayPicker(null)
+                                    }}
+                                  />
+                                  <div
+                                    role="group"
+                                    aria-label={`Attendance for ${row.employee.name}, ${formatDateShort(day)}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Escape') setDayPicker(null)
+                                    }}
+                                    className="absolute left-1/2 top-full z-40 mt-1.5 w-44 -translate-x-1/2 rounded-xl border border-stone-200/90 bg-white p-2 shadow-2xl ring-1 ring-black/5"
+                                  >
+                                    <div className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-stone-400 text-left">
+                                      {formatDateShort(day)} · {weekdayShort(day)}
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-1.5 mb-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          markAttendance(row.employee, day, 'full')
+                                          setDayPicker(null)
+                                        }}
+                                        className={clsx(
+                                          'flex h-11 flex-col items-center justify-center rounded-lg font-black text-xs transition cursor-pointer select-none',
+                                          att?.status === 'full'
+                                            ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-600 ring-offset-1'
+                                            : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 active:scale-95 border border-emerald-200/60',
+                                        )}
+                                      >
+                                        <span className="text-sm font-black leading-none">P</span>
+                                        <span className="text-[9px] font-bold mt-0.5 leading-none">{tx('Full')}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          markAttendance(row.employee, day, 'half')
+                                          setDayPicker(null)
+                                        }}
+                                        className={clsx(
+                                          'flex h-11 flex-col items-center justify-center rounded-lg font-black text-xs transition cursor-pointer select-none',
+                                          att?.status === 'half'
+                                            ? 'bg-amber-500 text-white shadow-xs ring-2 ring-amber-500 ring-offset-1'
+                                            : 'bg-amber-50 text-amber-800 hover:bg-amber-100 active:scale-95 border border-amber-200/60',
+                                        )}
+                                      >
+                                        <span className="text-sm font-black leading-none">H</span>
+                                        <span className="text-[9px] font-bold mt-0.5 leading-none">{tx('Half')}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          markAttendance(row.employee, day, 'absent')
+                                          setDayPicker(null)
+                                        }}
+                                        className={clsx(
+                                          'flex h-11 flex-col items-center justify-center rounded-lg font-black text-xs transition cursor-pointer select-none',
+                                          att?.status === 'absent'
+                                            ? 'bg-rose-500 text-white shadow-xs ring-2 ring-rose-500 ring-offset-1'
+                                            : 'bg-rose-50 text-rose-800 hover:bg-rose-100 active:scale-95 border border-rose-200/60',
+                                        )}
+                                      >
+                                        <span className="text-sm font-black leading-none">A</span>
+                                        <span className="text-[9px] font-bold mt-0.5 leading-none">{tx('Absent')}</span>
+                                      </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-stone-100">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          showHours(row.employee, day, att)
+                                          setDayPicker(null)
+                                        }}
+                                        className={clsx(
+                                          'flex h-8 items-center justify-center gap-1 rounded-lg px-2 text-xs font-bold transition cursor-pointer select-none',
+                                          att?.status === 'hours'
+                                            ? 'bg-sky-600 text-white shadow-xs'
+                                            : 'bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200/60',
+                                        )}
+                                      >
+                                        <span>⏱</span>
+                                        <span>{tx('Hours')}</span>
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          markAttendance(row.employee, day, undefined)
+                                          setDayPicker(null)
+                                        }}
+                                        className="flex h-8 items-center justify-center gap-1 rounded-lg border border-stone-200 bg-white px-2 text-xs font-bold text-stone-600 hover:bg-stone-50 active:scale-95 cursor-pointer select-none"
+                                      >
+                                        <span>✕</span>
+                                        <span>{tx('Clear')}</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </>
                               )}
 
                               {Boolean(att?.ot_minutes) && (
                                 <span
                                   title={`+${formatHours(att!.ot_minutes)} Overtime`}
-                                  className="pointer-events-none absolute -right-1 -top-1 rounded bg-stone-900 px-1 py-0.2 text-[8px] font-black leading-tight text-white shadow-xs"
+                                  className="pointer-events-none absolute -right-1.5 -top-1.5 rounded-full bg-stone-900 px-1.5 py-0.2 text-[9px] font-black leading-tight text-white shadow-xs"
                                 >
                                   +{formatHours(att!.ot_minutes)}
                                 </span>
@@ -1383,11 +1474,11 @@ export default function AttendancePage() {
                         style={{ width: colWidths['earned'] ? `${colWidths['earned']}px` : undefined }}
                         className="w-24 min-w-[6rem] border-b border-r border-stone-200/60 px-2 py-1.5 text-right tabular-nums align-middle whitespace-nowrap"
                       >
-                        <div className="font-mono text-xs sm:text-[13px] font-bold text-stone-900">
+                        <div className="font-mono text-sm sm:text-[15px] font-bold text-stone-900">
                           {formatMoney(row.earnings)}
                         </div>
                         <div className="mt-0.5">
-                          <span className="inline-block rounded bg-stone-100 px-1 py-0.2 text-[9px] font-semibold text-stone-600 tabular-nums whitespace-nowrap">
+                          <span className="inline-block rounded bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 tabular-nums whitespace-nowrap">
                             {row.earnedBreakdown}
                           </span>
                         </div>
@@ -1405,7 +1496,7 @@ export default function AttendancePage() {
                             aria-label={`Adjustment for ${row.employee.name}`}
                             disabled={locked}
                             className={clsx(
-                              'h-8 w-full max-w-[4.75rem] rounded-md border px-1.5 text-right font-mono text-xs font-semibold tabular-nums shadow-2xs outline-none transition',
+                              'h-8.5 w-full max-w-[5rem] rounded-md border px-1.5 text-right font-mono text-xs sm:text-[13px] font-bold tabular-nums shadow-2xs outline-none transition',
                               row.draft.adj_paise > 0
                                 ? 'border-emerald-300 bg-emerald-50 text-emerald-950 font-bold focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600'
                                 : row.draft.adj_paise < 0
@@ -1434,7 +1525,7 @@ export default function AttendancePage() {
                           <input
                             aria-label={`Adjustment note for ${row.employee.name}`}
                             disabled={locked}
-                            className="w-full max-w-[4.75rem] border-b border-transparent bg-transparent px-1 text-[10px] text-right text-stone-500 outline-none placeholder:text-stone-300 hover:border-stone-200 focus:border-stone-400 focus:text-stone-800 transition"
+                            className="w-full max-w-[5rem] border-b border-transparent bg-transparent px-1 text-[10px] text-right text-stone-500 outline-none placeholder:text-stone-300 hover:border-stone-200 focus:border-stone-400 focus:text-stone-800 transition"
                             placeholder="+ note"
                             value={row.draft.adj_note}
                             onChange={(e) =>
@@ -1451,10 +1542,10 @@ export default function AttendancePage() {
                         style={{ width: colWidths['upad'] ? `${colWidths['upad']}px` : undefined }}
                         className="w-20 min-w-[5rem] max-w-[5.5rem] border-b border-r border-stone-200/60 px-1.5 py-1.5 text-right tabular-nums align-middle whitespace-nowrap"
                       >
-                        <div className="font-mono text-xs font-bold text-slate-800">
+                        <div className="font-mono text-xs sm:text-sm font-bold text-slate-900">
                           {formatMoney(row.upadBalance)}
                         </div>
-                        <div className="mt-0.5 text-[9px] font-medium text-stone-400">
+                        <div className="mt-0.5 text-[10px] font-medium text-stone-500">
                           {tx('rem:')} {formatMoney(row.afterUpad)}
                         </div>
                       </td>
@@ -1472,7 +1563,7 @@ export default function AttendancePage() {
                             aria-label={`Upad Deduct for ${row.employee.name}`}
                             disabled={locked}
                             className={clsx(
-                              'h-8 w-full max-w-[4.75rem] rounded-md border px-1.5 text-right font-mono text-xs font-semibold tabular-nums shadow-2xs outline-none transition',
+                              'h-8.5 w-full max-w-[5rem] rounded-md border px-1.5 text-right font-mono text-xs sm:text-[13px] font-bold tabular-nums shadow-2xs outline-none transition',
                               row.warnings.deductExceedsUpad
                                 ? 'border-rose-400 bg-rose-50 text-rose-900 focus:border-rose-600 focus:ring-1 focus:ring-rose-600'
                                 : row.draft.deduct_paise > 0
@@ -1489,12 +1580,12 @@ export default function AttendancePage() {
                             }
                           />
                           {row.warnings.deductExceedsUpad && (
-                            <span className="mt-0.5 text-[9px] font-semibold text-rose-700">
+                            <span className="mt-0.5 text-[10px] font-bold text-rose-700">
                               {tx("Exceeds")}
                             </span>
                           )}
                           {row.warnings.deductExceedsEarnings && !row.warnings.deductExceedsUpad && (
-                            <span className="mt-0.5 text-[9px] font-semibold text-amber-700">
+                            <span className="mt-0.5 text-[10px] font-bold text-amber-700">
                               {tx("Exceeds earned")}
                             </span>
                           )}
@@ -1514,7 +1605,7 @@ export default function AttendancePage() {
                             aria-label={`Give Upad for ${row.employee.name}`}
                             disabled={locked}
                             className={clsx(
-                              'h-8 w-full max-w-[4.75rem] rounded-md border px-1.5 text-right font-mono text-xs font-semibold tabular-nums shadow-2xs outline-none transition',
+                              'h-8.5 w-full max-w-[5rem] rounded-md border px-1.5 text-right font-mono text-xs sm:text-[13px] font-bold tabular-nums shadow-2xs outline-none transition',
                               row.draft.give_upad_paise > 0
                                 ? 'border-stone-300 bg-white text-stone-900 font-bold focus:border-stone-900 focus:ring-1 focus:ring-stone-900'
                                 : 'border-stone-200/60 bg-stone-50/40 text-stone-400 hover:bg-white hover:border-stone-300 focus:bg-white focus:border-stone-900 focus:ring-1 focus:ring-stone-900 focus:text-stone-900',
@@ -1544,10 +1635,10 @@ export default function AttendancePage() {
                             aria-label={`To Pay for ${row.employee.name}`}
                             disabled={locked}
                             className={clsx(
-                              'h-8 w-full max-w-[5.5rem] rounded-md px-1.5 text-right font-mono text-xs font-bold tabular-nums shadow-2xs outline-none transition',
+                              'h-8.5 w-full max-w-[6rem] rounded-md px-2 text-right font-mono text-sm sm:text-[15px] font-bold tabular-nums shadow-2xs outline-none transition',
                               row.draft.is_done
-                                ? 'border-2 border-emerald-600 bg-emerald-50 text-emerald-950 font-black'
-                              : 'border border-stone-300 bg-white text-stone-900 hover:border-stone-400 focus:border-stone-500 focus:bg-stone-100 focus:ring-1 focus:ring-stone-400',
+                                ? 'border-2 border-emerald-600 bg-emerald-50 text-emerald-950 font-black ring-1 ring-emerald-600/30'
+                              : 'border border-stone-300 bg-white text-stone-900 hover:border-stone-400 focus:border-stone-900 focus:bg-stone-50 focus:ring-1 focus:ring-stone-900',
                               locked && 'cursor-not-allowed bg-stone-100 text-stone-400',
                             )}
                             placeholder={paiseToInput(row.toPay)}
@@ -1954,13 +2045,13 @@ function SearchBox({
 }) {
   return (
     <label className="relative block">
-      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone-400" />
+      <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
       <input
         aria-label={tx("Search")}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? 'Search…'}
-        className="h-7 w-full rounded-lg border border-stone-200 bg-white pl-7 pr-2 text-xs font-medium text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-600"
+        className="h-8.5 w-full rounded-lg border border-stone-200 bg-white pl-8 pr-2.5 text-xs sm:text-[13px] font-medium text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 shadow-2xs"
       />
     </label>
   )
@@ -2026,14 +2117,14 @@ function StatusPill({
   onClick: () => void
 }) {
   const activeStyles = {
-    emerald: 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700 active:scale-95',
-    amber: 'bg-amber-500 text-white shadow-2xs hover:bg-amber-600 active:scale-95',
-    rose: 'bg-rose-500 text-white shadow-2xs hover:bg-rose-600 active:scale-95',
+    emerald: 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700 active:scale-95 ring-2 ring-emerald-600 ring-offset-1',
+    amber: 'bg-amber-500 text-white shadow-xs hover:bg-amber-600 active:scale-95 ring-2 ring-amber-500 ring-offset-1',
+    rose: 'bg-rose-500 text-white shadow-xs hover:bg-rose-600 active:scale-95 ring-2 ring-rose-500 ring-offset-1',
   }
   const idleStyles = {
-    emerald: 'border border-stone-200 bg-white text-stone-700 hover:border-emerald-400 hover:bg-emerald-50/40 hover:text-emerald-800 active:scale-95',
-    amber: 'border border-stone-200 bg-white text-stone-700 hover:border-amber-400 hover:bg-amber-50/40 hover:text-amber-800 active:scale-95',
-    rose: 'border border-stone-200 bg-white text-stone-700 hover:border-rose-400 hover:bg-rose-50/40 hover:text-rose-800 active:scale-95',
+    emerald: 'border border-stone-200 bg-white text-stone-700 hover:border-emerald-400 hover:bg-emerald-50/50 hover:text-emerald-800 active:scale-95',
+    amber: 'border border-stone-200 bg-white text-stone-700 hover:border-amber-400 hover:bg-amber-50/50 hover:text-amber-800 active:scale-95',
+    rose: 'border border-stone-200 bg-white text-stone-700 hover:border-rose-400 hover:bg-rose-50/50 hover:text-rose-800 active:scale-95',
   }
 
   return (
@@ -2044,12 +2135,12 @@ function StatusPill({
       aria-label={tx(hint)}
       aria-pressed={active}
       className={clsx(
-        'inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none cursor-pointer',
+        'inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-xs sm:text-[13px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed select-none cursor-pointer',
         active ? activeStyles[tone] : idleStyles[tone],
       )}
     >
-      <span>{label}</span>
-      <span className="hidden text-[10px] font-medium opacity-80 md:inline">{hint}</span>
+      <span className="font-black text-sm">{label}</span>
+      <span className="hidden text-[11px] font-semibold opacity-90 md:inline">{tx(hint)}</span>
     </button>
   )
 }
